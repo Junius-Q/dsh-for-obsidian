@@ -1,0 +1,26 @@
+name: Feature request
+description: Suggest a new feature for dsh for Obsidian
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: feature
+    attributes:
+      label: What problem does this solve?
+      description: A clear description of the need or the pain point.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How you imagine it working.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Any workarounds you've considered.
+    validations:
+      required: false

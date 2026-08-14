@@ -1,0 +1,54 @@
+name: Bug report
+description: Report a problem with the dsh for Obsidian plugin
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: What happened, and what did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the chat panel…
+        2. …
+    validations:
+      required: true
+  - type: input
+    id: obsidian
+    attributes:
+      label: Obsidian version
+      placeholder: e.g. 1.8.7
+    validations:
+      required: true
+  - type: input
+    id: dsh
+    attributes:
+      label: dsh version
+      description: Output of `dsh --version`
+      placeholder: e.g. 0.1.0
+    validations:
+      required: false
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Other
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant plugin output / console errors
+      description: Paste any errors from the Obsidian developer console (Ctrl+Shift+I).
+    validations:
+      required: false
