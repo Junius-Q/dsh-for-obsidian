@@ -1,5 +1,7 @@
 # dsh for Obsidian
 
+> [**English**](README.md) · **中文**
+
 > 在 [Obsidian](https://obsidian.md) 中使用 **DeepSeek Harness (dsh)** — 一个仿 Claudian 风格的本地 AI 智能体，为你处理 vault 中的笔记。
 
 ## 这是什么？

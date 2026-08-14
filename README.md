@@ -1,5 +1,7 @@
 # dsh for Obsidian
 
+> **English** · [**中文 (Chinese)**](README.zh.md)
+
 > Use **DeepSeek Harness (dsh)** inside [Obsidian](https://obsidian.md) — a Claudian-style local AI agent for your vault.
 
 ## What is this?
@@ -101,11 +103,3 @@ Working Phase 2 plugin: chat panel over a resident local dsh HTTP service (strea
 
 [MIT](LICENSE)
 
----
-
-## 中文简介（Chinese）
-
-**dsh for Obsidian** 把本地优先的 DeepSeek Harness (dsh) 智能体接进 Obsidian，让你在笔记工具里直接与 dsh 对话、总结/翻译/改写笔记、并读写你的 vault。
-对标 **Claudian** 同样采用 **本地壳 + 本地大脑** 模式：插件只是薄壳，在本地拉起 `dsh --profile web` 服务并通过本地 HTTP 与其交互，必要时回退到 `dsh --profile headless`；不调用远程模型。可在插件的 ⚙ 菜单或设置里配置 DeepSeek API key，写入 dsh 配置文件，插件/CLI/web 通用。
-
-设计细节见 `design/ARCHITECTURE.md`（中文）与 `design/ROADMAP.md`（开发里程碑）。
