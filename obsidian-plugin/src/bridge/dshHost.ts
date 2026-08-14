@@ -10,7 +10,11 @@ import type { ObsidianDshSettings } from "../settings";
 export class DshHostManager {
   private child: ChildProcess | null = null;
   private baseUrl: string | null = null;
-  private awaitingStart: Array<{ resolve: (url: string) => void; reject: (e: Error) => void }> = [];
+  private awaitingStart: Array<{
+    resolve: (url: string) => void;
+    reject: (e: Error) => void;
+    finish?: (fn?: () => void) => void;
+  }> = [];
   private stdoutBuf = "";
   private hadOutput = false;
 
@@ -29,26 +33,66 @@ export class DshHostManager {
   /**
    * Ensure the host is running, returning its base URL.
    * If already running, resolves immediately with the cached URL.
+   * Rejects if the URL isn't advertised within `timeoutMs`.
    */
   async ensureStarted(timeoutMs = 30000): Promise<string> {
     if (this.isRunning() && this.baseUrl) return this.baseUrl;
-    if (this.child) {
-      // still starting — queue a waiter
-      return new Promise<string>((resolve, reject) => this.awaitingStart.push({ resolve, reject }));
-    }
-    await this.start();
-    return new Promise<string>((resolve, reject) => this.awaitingStart.push({ resolve, reject }));
+    // Queue a waiter, then arm a timeout so we never hang forever if the host
+    // spawns but never advertises a URL.
+    return new Promise<string>((resolve, reject) => {
+      let done = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const finish = (fn: () => void) => {
+        if (done) return;
+        done = true;
+        if (timer) clearTimeout(timer);
+        // remove this waiter from the queue
+        const i = this.awaitingStart.findIndex((w) => w.finish === finish);
+        if (i !== -1) this.awaitingStart.splice(i, 1);
+        fn();
+      };
+      const waiter = {
+        finish,
+        resolve: (url: string) => finish(() => resolve(url)),
+        reject: (e: Error) => finish(() => reject(e)),
+      };
+      this.awaitingStart.push(waiter);
+      timer = setTimeout(() => {
+        if (!done) {
+          const err = new Error(`Timed out waiting for dsh web to start after ${timeoutMs}ms`);
+          waiter.reject(err);
+        }
+      }, timeoutMs);
+
+      // If no child is running yet, kick off the spawn now.
+      if (!this.child && !this.isRunning()) {
+        void this.start();
+      }
+    });
   }
 
   /** Stop the host process if running. */
   stop(): void {
-    if (this.child) {
-      this.child.kill();
-      this.child = null;
-    }
+    const child = this.child;
+    this.child = null;
     this.baseUrl = null;
     this.awaitingStart.forEach((w) => w.reject(new Error("dsh host stopped")));
     this.awaitingStart = [];
+    if (!child) return;
+    if (process.platform === "win32" && child.pid) {
+      // On Windows we spawn via cmd.exe; killing only cmd leaves the dsh node
+      // child orphaned. Use taskkill to kill the whole process tree.
+      try {
+        require("child_process").exec(
+          `taskkill /pid ${child.pid} /T /F`,
+          () => {}
+        );
+      } catch {
+        /* ignore */
+      }
+    } else {
+      child.kill();
+    }
   }
 
   private async start(): Promise<void> {

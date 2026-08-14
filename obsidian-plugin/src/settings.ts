@@ -1,6 +1,7 @@
-import { App, Notice, PluginSettingTab, Setting } from "obsidian";
+import { App, Modal, Notice, PluginSettingTab, Setting } from "obsidian";
 import type ObsidianDsh from "./main";
 import { t } from "./i18n";
+import { credentialsPath, isKeyConfigured, setStoredKey } from "./bridge/dshConfig";
 
 export interface ObsidianDshSettings {
   /** dsh executable name or absolute path. */
@@ -37,11 +38,67 @@ export class ObsidianDshSettingTab extends PluginSettingTab {
     this.plugin = plugin;
   }
 
+  /** Resolve the currently open vault's absolute path (for display). */
+  private currentVaultPath(): string {
+    try {
+      const adapter = this.app.vault.adapter as unknown as { getBasePath?: () => string };
+      const p = typeof adapter.getBasePath === "function" ? adapter.getBasePath() : undefined;
+      return p ? `\`${p}\`` : "(unavailable)";
+    } catch {
+      return "(unavailable)";
+    }
+  }
+
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
 
     containerEl.createEl("h2", { text: "dsh for Obsidian — Settings" });
+
+    // DeepSeek API key — written to dsh's own ~/.dsh/.credentials.yaml so it
+    // works everywhere (plugin, CLI, web) with one entry.
+    containerEl.createEl("h3", {
+      text: isKeyConfigured() ? "DeepSeek API Key（已配置）" : "DeepSeek API Key",
+    });
+    const keyDesc = isKeyConfigured()
+      ? "已写入 dsh 配置文件（插件/CLI/web 通用）。输入新值并保存可覆盖；留空可清除。"
+      : "未配置。填入 DeepSeek API key 并保存，会写入 dsh 配置文件（插件/CLI/web 通用）。";
+    const keyStatus = containerEl.createEl("div", {
+      text: isKeyConfigured() ? "✓ 已配置" : "○ 未配置",
+      cls: "setting-item-description",
+    });
+    void keyStatus;
+    new Setting(containerEl)
+      .setName("DeepSeek API key")
+      .setDesc(keyDesc)
+      .addText((text) => text.setPlaceholder("sk-…").inputEl.setAttribute("type", "password"))
+      .addButton((btn) =>
+        btn.setButtonText("保存").onClick(async () => {
+          const comp = btn.buttonEl.closest(".setting-item")?.querySelector("input");
+          const val = (comp as HTMLInputElement | null)?.value?.trim() ?? "";
+          if (!val) {
+            new Notice("未输入 key，未做更改（如需清除请使用「清除」）");
+            return;
+          }
+          const saved = setStoredKey(val);
+          new Notice(saved ? "已保存到 dsh 配置文件（全局生效）" : "保存失败，请检查配置目录权限");
+          if (keyStatus) keyStatus.textContent = saved ? "✓ 已配置" : "○ 保存失败";
+        })
+      )
+      .addButton((btn) =>
+        btn.setButtonText("清除").onClick(() => {
+          const msg = "清除已保存的 DeepSeek API key？";
+          new ConfirmModal(this.app, msg, () => {
+            const cleared = setStoredKey(null);
+            new Notice(cleared ? "已清除" : "清除失败");
+            if (keyStatus) keyStatus.textContent = "○ 未配置";
+          }).open();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName("配置位置")
+      .setDesc(`Key 写入 dsh 配置文件：\`${credentialsPath()}\``);
 
     new Setting(containerEl)
       .setName("dsh executable")
@@ -74,11 +131,12 @@ export class ObsidianDshSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Working directory")
       .setDesc(
-        "Directory dsh works in. Leave empty to use the vault root."
+        "Folder dsh treats as its workspace (where 'workspace-write' applies). Leave empty to follow the CURRENT vault — swapping vaults or machines automatically re-targets it. Currently: " +
+          this.currentVaultPath()
       )
       .addText((text) =>
         text
-          .setPlaceholder("(vault root)")
+          .setPlaceholder("(follow current vault)")
           .setValue(this.plugin.settings.workingDir)
           .onChange(async (value) => {
             this.plugin.settings.workingDir = value.trim();
@@ -164,5 +222,35 @@ export class ObsidianDshSettingTab extends PluginSettingTab {
           }
         })
       );
+  }
+}
+
+/** Obsidian-styled confirmation modal (avoids native confirm() in settings). */
+class ConfirmModal extends Modal {
+  constructor(
+    app: App,
+    private message: string,
+    private onConfirm: () => void
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h3", { text: t("confirmTitle") });
+    contentEl.createEl("p", { text: this.message });
+    const actions = contentEl.createDiv({ cls: "obdsh-prompt-actions" });
+    const cancel = actions.createEl("button", { cls: "obdsh-btn obdsh-btn-ghost", text: t("cmdCancel") });
+    cancel.addEventListener("click", () => this.close());
+    const ok = actions.createEl("button", { cls: "obdsh-btn obdsh-btn-primary", text: t("cmdConfirm") });
+    ok.addEventListener("click", () => {
+      this.onConfirm();
+      this.close();
+    });
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
   }
 }

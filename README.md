@@ -6,25 +6,30 @@
 
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) is a local-first AI agent runtime. This plugin wires that agent into Obsidian so you can **chat with it, summarize/translate/rewrite your notes, and drive it right from your vault** — without leaving the app.
 
-Modeled on the same pattern as the **Claudian** plugin: the plugin is a thin shell that spawns a **local CLI agent** (here `dsh --profile headless`), instead of calling a remote model.
+Modeled on the same pattern as the **Claudian** plugin: the plugin is a thin shell that drives a **local CLI agent** (`dsh`), instead of calling a remote model.
 
 ```
 ┌──────────────── Obsidian (local) ────────────────┐
 │  [ dsh-for-obsidian chat panel / commands ]      │
-│          │   spawns a local dsh subprocess       │
+│          │   local HTTP (requestUrl)             │
 │          ▼                                        │
 └──────────┴───────────────────────────────────────┘
            ▼
-   [ dsh --profile headless ]   ← the local agent "brain"
+   [ dsh --profile web ]   ← the local agent "brain",
+                             falling back to headless
 ```
 
 Unlike "cloud-shell" plugins, dsh runs entirely locally — **local shell + local brain**.
 
 ## Features
 
-- **Chat panel** — converse with a local dsh agent in a sidebar; the active note is attached as context.
+- **Chat panel** — converse with a local dsh agent in a sidebar; the active note is attached as context. Replies stream in with Markdown formatting.
+- **Model / permission / reasoning controls** — switch model, permission preset, and reasoning effort right from the composer bar.
+- **Context usage ring** — click to see token usage / context-window usage.
+- **Session history** — list, rename, archive, and fork conversations (right-click a session).
 - **Note commands** — Summarize / Translate / Rewrite the selected text, backed by dsh.
 - **Flexible write-back** — append to note / overwrite selection / insert at cursor / new note.
+- **API key configuration** — enter your DeepSeek key from the chat panel ⚙ menu or the plugin settings; it is written to dsh's own config and shared with the CLI and web UI.
 - **Connection test** — Settings includes a one-click test of the dsh CLI.
 - **Local & private** — no remote model call from the plugin; dsh runs on your machine.
 - **Bilingual UI** — the panel auto-follows the Obsidian app language (English / Chinese). Requires Obsidian **1.8.7+**.
@@ -39,7 +44,7 @@ Unlike "cloud-shell" plugins, dsh runs entirely locally — **local shell + loca
 npm i -g @deepseek-ai/dsh
 ```
 
-> dsh spawns the LLM it is configured to use (e.g. DeepSeek) via its own configuration. The plugin never reads or stores your API keys.
+> dsh spawns the LLM it is configured to use (e.g. DeepSeek) via its own configuration. You can enter your API key from the chat panel's ⚙ menu or the plugin settings — it is stored in dsh's credentials file (`~/.dsh/.credentials.yaml`) and shared across the plugin, CLI, and web UI.
 
 ## Install
 
@@ -80,17 +85,17 @@ npm run build      # type-check + production bundle
 
 ## How it connects to dsh
 
-Phase 1 uses the dsh headless entry point:
+The plugin spawns a resident local `dsh --profile web` HTTP service on `127.0.0.1` (random port) and talks to it over a JSON-RPC-style API. Chat messages are submitted to a dsh session and replies are polled from `session.history`, so output can stream into the panel.
+
+If the HTTP service cannot start (e.g. the dsh CLI is missing or a config issue), the plugin falls back to the headless entry point:
 
 ```bash
 dsh --profile headless "your task"
 ```
 
-This prints the final assistant message and exits. The plugin spawns this subprocess via `child_process`. A Phase 2 upgrade to a resident local HTTP service is planned for streaming output.
-
 ## Status
 
-Working Phase 1 plugin: chat panel + note commands via the headless bridge. See [`design/ARCHITECTURE.md`](design/ARCHITECTURE.md) and [`design/ROADMAP.md`](design/ROADMAP.md).
+Working Phase 2 plugin: chat panel over a resident local dsh HTTP service (streaming, model/permission/reasoning controls, session history), with note commands and a headless fallback. See [`design/ARCHITECTURE.md`](design/ARCHITECTURE.md) and [`design/ROADMAP.md`](design/ROADMAP.md).
 
 ## License
 
@@ -101,6 +106,6 @@ Working Phase 1 plugin: chat panel + note commands via the headless bridge. See 
 ## 中文简介（Chinese）
 
 **dsh for Obsidian** 把本地优先的 DeepSeek Harness (dsh) 智能体接进 Obsidian，让你在笔记工具里直接与 dsh 对话、总结/翻译/改写笔记、并读写你的 vault。
-对标 **Claudian** 同样采用 **本地壳 + 本地大脑** 模式：插件只是薄壳，通过 `child_process` 派生本地的 `dsh --profile headless`，不调用远程模型、也绝不接触你的密钥。
+对标 **Claudian** 同样采用 **本地壳 + 本地大脑** 模式：插件只是薄壳，在本地拉起 `dsh --profile web` 服务并通过本地 HTTP 与其交互，必要时回退到 `dsh --profile headless`；不调用远程模型。可在插件的 ⚙ 菜单或设置里配置 DeepSeek API key，写入 dsh 配置文件，插件/CLI/web 通用。
 
 设计细节见 `design/ARCHITECTURE.md`（中文）与 `design/ROADMAP.md`（开发里程碑）。

@@ -1,9 +1,40 @@
-/* dsh for Obsidian — DeepSeek web-inspired chat panel */
+/* dsh for Obsidian — DeepSeek web-inspired theme */
+
+:root {
+  --obdsh-brand: #4d6bfe;
+  --obdsh-brand-2: #7a90ff;
+  --obdsh-brand-3: #3a56e0;
+  --obdsh-radius-bubble: 18px;
+  --obdsh-radius-control: 10px;
+}
+
+/* Native Obsidian menus (e.g. the "+" command menu) — blend with the theme. */
+body .menu {
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.2);
+}
+body .menu .menu-item {
+  border-radius: 6px;
+}
+body .menu .menu-item.selected {
+  background: var(--background-modifier-hover);
+}
+
+/* Dropdowns opened to match their (narrow) trigger button: keep items on a
+   single, left-aligned line; overflow is truncated with "…" instead of wrapping. */
+body .menu.obdsh-dd-open .menu-item {
+  font-size: var(--font-ui-smaller);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+  justify-content: flex-start;
+}
 
 /* ------------------------------------------------------------------ */
 /* Layout: single panel, full height column                            */
-/* The root IS the Obsidian `.view-content`. Make it fill the pane so   */
-/* the composer stays anchored to the bottom.                          */
 /* ------------------------------------------------------------------ */
 .obsidian-dsh-chat {
   display: flex;
@@ -11,24 +42,24 @@
   height: 100%;
   overflow: hidden;
   position: relative;
+  background:
+    radial-gradient(1200px 600px at 100% -10%, color-mix(in srgb, var(--obdsh-brand) 12%, transparent), transparent 60%),
+    var(--background-primary);
 }
 
-/* Ensure the messages region can shrink and pushes composer to bottom. */
+/* Force a definite height and overscroll containment on the Obsidian view-content. */
+.view-content.obsidian-dsh-chat {
+  height: 100%;
+  overscroll-behavior: none;
+}
+
 .obsidian-dsh-chat > .obdsh-messages {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
 }
-
 .obsidian-dsh-chat > .obdsh-composer {
   flex: 0 0 auto;
-}
-
-/* Obsidian may give .view-content `overflow:auto` and no flex height;
-   force a definite height so 100% resolves correctly. */
-.view-content.obsidian-dsh-chat {
-  height: 100%;
-  overscroll-behavior: none;
 }
 
 /* ------------------------------------------------------------------ */
@@ -37,29 +68,40 @@
 .obdsh-toolbar {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 10px;
+  gap: 8px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--background-modifier-border);
+  background: color-mix(in srgb, var(--background-primary) 80%, transparent);
+  backdrop-filter: blur(6px);
   flex: 0 0 auto;
 }
 
 .obdsh-toolbar-brand {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 8px;
   flex: 1;
   min-width: 0;
 }
 
 .obdsh-brand-mark {
-  color: var(--interactive-accent, #4d6bfe);
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--obdsh-brand), var(--obdsh-brand-2));
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
   font-weight: 700;
-  font-size: 1.1em;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--obdsh-brand) 40%, transparent);
 }
 
 .obdsh-brand-title {
   font-weight: 700;
   font-size: var(--font-ui-medium);
+  letter-spacing: 0.2px;
 }
 
 .obdsh-brand-sub {
@@ -74,20 +116,24 @@
   background: none;
   border: none;
   color: var(--text-muted);
-  font-size: 1em;
+  font-size: 1.1em;
   line-height: 1;
-  padding: 4px 6px;
-  border-radius: var(--radius-s, 4px);
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
 }
-
 .obdsh-icon-btn:hover {
   background: var(--background-modifier-hover);
   color: var(--text-normal);
 }
 
 /* ------------------------------------------------------------------ */
-/* History panel (collapsible session list)                            */
+/* History panel                                                       */
 /* ------------------------------------------------------------------ */
 .obdsh-history {
   flex: 0 0 auto;
@@ -96,32 +142,26 @@
   border-bottom: 1px solid var(--background-modifier-border);
   background: var(--background-secondary);
 }
-
 .obdsh-history-empty {
   padding: 10px 14px;
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
 }
-
 .obdsh-history-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 7px 14px;
+  padding: 8px 14px;
   cursor: pointer;
-  border-left: 2px solid transparent;
+  border-left: 3px solid transparent;
+  transition: background 0.12s;
 }
-
-.obdsh-history-item:hover {
-  background: var(--background-modifier-hover);
-}
-
+.obdsh-history-item:hover { background: var(--background-modifier-hover); }
 .obdsh-history-item.is-active {
   background: var(--background-modifier-hover);
-  border-left-color: var(--interactive-accent, #4d6bfe);
+  border-left-color: var(--obdsh-brand);
 }
-
 .obdsh-history-item-title {
   font-size: var(--font-ui-smaller);
   overflow: hidden;
@@ -129,7 +169,6 @@
   white-space: nowrap;
   flex: 1;
 }
-
 .obdsh-history-item-count {
   font-size: var(--font-ui-smaller);
   color: var(--text-muted);
@@ -142,32 +181,36 @@
 .obdsh-messages {
   flex: 1 1 auto;
   overflow-y: auto;
-  padding: 14px 12px;
+  padding: 18px 16px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
   min-height: 0;
+  scrollbar-width: thin;
 }
 
 .obdsh-hint {
   text-align: center;
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
-  margin: 12px 0;
+  margin: 20px 0;
 }
 
-/* Message row: avatar + bubble */
+/* Message row */
 .obdsh-msg {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px 10px;
   align-items: flex-start;
   max-width: 100%;
 }
+.obdsh-msg-user { flex-direction: row-reverse; }
 
+/* Avatar */
 .obdsh-avatar {
   flex: 0 0 auto;
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -175,108 +218,84 @@
   font-size: 12px;
   font-weight: 600;
   margin-top: 2px;
+  color: #fff;
 }
-
 .obdsh-avatar-user {
-  background: var(--interactive-accent, #4d6bfe);
-  color: #fff;
+  background: linear-gradient(135deg, var(--obdsh-brand), var(--obdsh-brand-3));
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--obdsh-brand) 35%, transparent);
 }
-
 .obdsh-avatar-ai {
-  background: linear-gradient(
-    135deg,
-    var(--interactive-accent, #4d6bfe),
-    var(--interactive-accent-hover, #7a90ff)
-  );
-  color: #fff;
+  background: linear-gradient(135deg, var(--obdsh-brand-2), var(--obdsh-brand));
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--obdsh-brand-2) 35%, transparent);
 }
 
-/* User bubble: right-aligned, brand-tinted */
-.obdsh-msg-user {
-  flex-direction: row-reverse;
-}
-
-.obdsh-msg-user .obdsh-bubble {
-  background: var(--interactive-accent, #4d6bfe);
-  color: var(--text-on-accent, #fff);
-  border-bottom-right-radius: 4px;
-}
-
-/* AI bubble: left-aligned, neutral */
-.obdsh-msg-assistant .obdsh-bubble {
-  background: var(--background-secondary);
-  border-bottom-left-radius: 4px;
-}
-
+/* Bubble — with a soft, consistent shadow on both sides */
 .obdsh-bubble {
-  border-radius: 14px;
-  padding: 8px 12px;
+  border-radius: var(--obdsh-radius-bubble);
+  padding: 10px 14px;
   white-space: pre-wrap;
   word-break: break-word;
   font-size: var(--font-ui-small);
-  line-height: 1.5;
-  max-width: 100%;
+  line-height: 1.55;
+  max-width: 86%;
+  box-sizing: border-box;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.06),
+    0 4px 14px rgba(0, 0, 0, 0.08);
+}
+.obdsh-msg-user .obdsh-bubble {
+  background: linear-gradient(135deg, var(--obdsh-brand), var(--obdsh-brand-3));
+  color: #fff;
+  border-bottom-right-radius: 6px;
+}
+.obdsh-msg-assistant .obdsh-bubble {
+  background: var(--background-secondary);
+  border-bottom-left-radius: 6px;
 }
 
-/* Markdown content inside bubbles */
-.obdsh-bubble p {
-  margin: 0.4em 0;
-}
-
-.obdsh-bubble p:first-child {
-  margin-top: 0;
-}
-
-.obdsh-bubble p:last-child {
-  margin-bottom: 0;
-}
-
-.obdsh-bubble code {
-  font-size: 0.9em;
-}
-
-.obdsh-msg-user .obdsh-bubble p {
-  color: inherit;
-}
+/* Bubble markdown */
+.obdsh-bubble p { margin: 0.45em 0; }
+.obdsh-bubble p:first-child { margin-top: 0; }
+.obdsh-bubble p:last-child { margin-bottom: 0; }
+.obdsh-bubble ul, .obdsh-bubble ol { margin: 0.4em 0; padding-left: 1.4em; }
+.obdsh-bubble code { font-size: 0.9em; background: color-mix(in srgb, var(--background-modifier-border) 50%, transparent); border-radius: 4px; padding: 0.1em 0.3em; }
+.obdsh-bubble pre { background: var(--background-modifier-accent); padding: 8px 10px; border-radius: 8px; overflow-x: auto; }
+.obdsh-msg-user .obdsh-bubble p { color: inherit; }
+.obdsh-msg-user .obdsh-bubble a { color: #fff; }
 
 /* Typing indicator */
-.obdsh-typing {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-}
-
+.obdsh-typing { display: inline-flex; gap: 5px; align-items: center; }
 .obdsh-typing-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
+  width: 7px; height: 7px; border-radius: 50%;
   background: var(--text-muted);
   animation: obdsh-blink 1.2s infinite ease-in-out;
 }
-
 .obdsh-typing-dot:nth-child(2) { animation-delay: 0.2s; }
 .obdsh-typing-dot:nth-child(3) { animation-delay: 0.4s; }
-
 @keyframes obdsh-blink {
   0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); }
   40% { opacity: 1; transform: scale(1); }
 }
 
-/* Streaming cursor */
-.obdsh-stream-text {
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
+/* Streaming text + cursor */
+.obdsh-stream-text { white-space: pre-wrap; word-break: break-word; }
 .obdsh-cursor {
-  display: inline-block;
-  color: var(--interactive-accent, #4d6bfe);
-  animation: obdsh-cursor-blink 0.8s steps(2) infinite;
-  font-weight: 700;
+  display: inline-block; color: var(--obdsh-brand);
+  animation: obdsh-cursor-blink 0.8s steps(2) infinite; font-weight: 700;
 }
+@keyframes obdsh-cursor-blink { 50% { opacity: 0; } }
 
-@keyframes obdsh-cursor-blink {
-  50% { opacity: 0; }
+/* Cache-hit stats */
+.obdsh-cache-stats {
+  margin-top: 8px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  opacity: 0.85;
+  border-top: 1px dashed var(--background-modifier-border);
+  padding-top: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 /* ------------------------------------------------------------------ */
@@ -284,10 +303,10 @@
 /* ------------------------------------------------------------------ */
 .obdsh-composer {
   flex: 0 0 auto;
-  padding: 8px 10px 10px;
+  padding: 10px 12px 12px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   border-top: 1px solid var(--background-modifier-border);
 }
 
@@ -298,9 +317,11 @@
   font-size: var(--font-ui-smaller);
   color: var(--text-muted);
 }
+.obdsh-composer-attach label { cursor: pointer; }
 
-.obdsh-composer-attach label {
-  cursor: pointer;
+/* Input wrapper — anchors the round send/stop button to the bottom-right. */
+.obdsh-input-wrap {
+  position: relative;
 }
 
 .obdsh-input {
@@ -311,30 +332,143 @@
   margin: 0;
   font: inherit;
   font-size: var(--font-ui-medium);
-  padding: 8px 10px;
+  padding: 10px 12px;
+  padding-bottom: 40px; /* keep text clear of the corner button */
+  border-radius: var(--obdsh-radius-control);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.obdsh-input:focus {
+  border-color: var(--obdsh-brand);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--obdsh-brand) 18%, transparent);
+  outline: none;
+}
+
+/* Round web-style send/stop button embedded in the input's bottom-right corner. */
+.obdsh-send {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  cursor: pointer;
+  background: linear-gradient(135deg, var(--obdsh-brand), var(--obdsh-brand-3));
+  color: #fff;
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--obdsh-brand) 40%, transparent);
+  transition: background 0.15s, transform 0.1s, box-shadow 0.15s, opacity 0.15s;
+}
+.obdsh-send:hover {
+  box-shadow: 0 3px 14px color-mix(in srgb, var(--obdsh-brand) 55%, transparent);
+}
+.obdsh-send:active { transform: translateY(1px); }
+.obdsh-send svg { display: block; }
+/* Busy face: keep the blue gradient fill, just swap the arrow for a stop square. */
+.obdsh-send.obdsh-stop {
+  background: linear-gradient(135deg, var(--obdsh-brand), var(--obdsh-brand-3));
+  color: #fff;
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--obdsh-brand) 45%, transparent);
+}
+.obdsh-send.obdsh-stop:hover {
+  background: linear-gradient(135deg, var(--obdsh-brand-2), var(--obdsh-brand));
+  box-shadow: 0 3px 14px color-mix(in srgb, var(--obdsh-brand) 55%, transparent);
+}
+/* Hide the corner button when the composer has no pending message and is idle. */
+textarea.obdsh-input:not(:focus):placeholder-shown + .obdsh-send:not(.obdsh-stop) {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .obdsh-composer-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 6px;
+  gap: 8px;
+}
+
+/* Composer multi-row web layout */
+.obdsh-composer-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.obdsh-composer-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.obdsh-composer-bottom {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.obdsh-composer-spacer { flex: 1; }
+
+/* Context usage ring */
+.obdsh-ring { flex: 0 0 auto; opacity: 0.9; }
+.obdsh-ring-clickable { cursor: pointer; }
+.obdsh-ring-clickable:hover { opacity: 1; }
+
+/* Selects (permission / reasoning effort) */
+.obdsh-select {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 8px);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-family: var(--font-interface);
+  padding: 4px 8px;
+  min-width: 90px;
+  max-width: 160px;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+}
+.obdsh-select:hover {
+  border-color: color-mix(in srgb, var(--obdsh-brand) 60%, transparent);
+  color: var(--text-normal);
+}
+.obdsh-select:focus {
+  border-color: var(--obdsh-brand);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--obdsh-brand) 15%, transparent);
+  outline: none;
+}
+.obdsh-model-select {
+  max-width: 190px;
+}.
+
+/* Command '+' button */
+.obdsh-cmd-btn {
+  font-size: 1.1em;
 }
 
 .obdsh-btn {
   border: none;
-  border-radius: var(--radius-m, 6px);
-  padding: 6px 14px;
+  border-radius: var(--obdsh-radius-control);
+  padding: 8px 18px;
   font-size: var(--font-ui-medium);
   cursor: pointer;
+  font-weight: 600;
+  transition: transform 0.1s, box-shadow 0.15s, background 0.15s;
 }
+.obdsh-btn:active { transform: translateY(1px); }
 
 .obdsh-btn-primary {
-  background: var(--interactive-accent, #4d6bfe);
-  color: var(--text-on-accent, #fff);
+  background: linear-gradient(135deg, var(--obdsh-brand), var(--obdsh-brand-3));
+  color: #fff !important;
+  -webkit-text-fill-color: #fff;
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--obdsh-brand) 35%, transparent);
 }
-
 .obdsh-btn-primary:hover {
-  background: var(--interactive-accent-hover, #3a56e0);
+  background: linear-gradient(135deg, var(--obdsh-brand), var(--obdsh-brand-3));
+  color: #fff !important;
+  -webkit-text-fill-color: #fff !important;
+  box-shadow: 0 3px 14px color-mix(in srgb, var(--obdsh-brand) 50%, transparent);
 }
 
 .obdsh-btn-ghost {
@@ -342,57 +476,282 @@
   color: var(--text-muted);
   border: 1px solid var(--background-modifier-border);
 }
+.obdsh-btn-ghost:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
 
-.obdsh-btn-ghost:hover {
-  background: var(--background-modifier-hover);
-  color: var(--text-normal);
-}
+/* ------------------------------------------------------------------ */
+/* Model selector (deprecated — now a <select>, see .obdsh-select/.obdsh-model-select) */
 
-/* Model selector (Phase 2) */
-.obdsh-model-btn {
-  background: var(--background-secondary);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-s, 4px);
-  color: var(--text-muted);
-  font-size: var(--font-ui-smaller);
-  padding: 3px 8px;
-  max-width: 120px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.obdsh-model-btn:hover {
-  background: var(--background-modifier-hover);
-  color: var(--text-normal);
-}
-
-/* Cache-hit stats line under a reply */
-.obdsh-cache-stats {
-  margin-top: 6px;
-  font-size: var(--font-ui-smaller);
-  color: var(--text-muted);
-  opacity: 0.8;
-  border-top: 1px dashed var(--background-modifier-border);
-  padding-top: 5px;
-}
-
-/* Model picker modal */
-.obdsh-model-list-status {
-  color: var(--text-muted);
-  font-size: var(--font-ui-smaller);
-}
-
+/* ------------------------------------------------------------------ */
+/* Model picker modal                                                  */
+/* ------------------------------------------------------------------ */
+.obdsh-model-list-status { color: var(--text-muted); font-size: var(--font-ui-smaller); }
 .obdsh-model-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 5px 0;
+  padding: 6px 0;
   border-bottom: 1px solid var(--background-modifier-border);
 }
+.obdsh-model-name { font-size: var(--font-ui-medium); }
 
-.obdsh-model-name {
-  font-size: var(--font-ui-medium);
+/* Message copy button (shown on hover) */
+.obdsh-msg {
+  position: relative;
 }
+.obdsh-copy-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  padding: 3px 6px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s;
+  z-index: 2;
+}
+.obdsh-msg:hover .obdsh-copy-btn { opacity: 0.9; }
+.obdsh-copy-btn:hover {
+  opacity: 1;
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+/* Keep user messages' copy button offset to the left side (row-reversed). */
+.obdsh-msg-user .obdsh-copy-btn {
+  right: auto;
+  left: 4px;
+}
+
+/* Ensure conversation text can always be selected/copied. */
+.obsidian-dsh-chat .obdsh-bubble,
+.obsidian-dsh-chat .obdsh-stream-text {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* Status stats line — its own row just below the input; centered text. */
+.obdsh-status {
+  flex: 0 0 auto;
+  align-self: stretch;
+  max-width: 100%;
+  padding: 2px 6px 0 6px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  text-align: center;
+}
+/* The text span shrinks and ellipsizes inside the row. */
+.obdsh-status-text {
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.obdsh-status .obdsh-cache-stats {
+  margin: 0;
+  border: none;
+  padding: 0;
+}
+
+/* Independent collapsible "thinking" block, separate from the reply bubble. */
+.obdsh-reasoning-card {
+  flex: 0 0 100%; /* force its own row above the reply bubble */
+  min-width: 0;
+  margin-bottom: 2px;
+  border: 1px solid color-mix(in srgb, var(--obdsh-brand) 30%, transparent);
+  border-left: 3px solid var(--obdsh-brand);
+  background: color-mix(in srgb, var(--background-secondary) 55%, transparent);
+  border-radius: 8px;
+  padding: 6px 12px;
+  box-sizing: border-box;
+}
+.obdsh-reasoning-card summary {
+  cursor: pointer;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  font-weight: 600;
+  user-select: none;
+}
+.obdsh-reasoning-card[open] summary {
+  color: var(--text-normal);
+}
+.obdsh-reasoning-body {
+  margin-top: 6px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 180px;
+  overflow-y: auto;
+  border-top: 1px dashed color-mix(in srgb, var(--background-modifier-border) 60%, transparent);
+  padding-top: 6px;
+}
+.obdsh-msg-user .obdsh-reasoning-card { display: none; }
+
+/* Prompt modal (rename input) */
+.obdsh-prompt-desc { margin: 4px 0 10px; color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.obdsh-prompt-input {
+  width: 100%;
+  padding: 8px 10px;
+  font: inherit;
+  border-radius: var(--obdsh-radius-control);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+}
+.obdsh-prompt-input:focus {
+  border-color: var(--obdsh-brand);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--obdsh-brand) 15%, transparent);
+  outline: none;
+}
+.obdsh-prompt-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+
+/* Custom dropdown (model / reasoning / permission) */
+.obdsh-dd {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+}
+/* Flat look: no nested "box" around the control; only a soft hover/active state. */
+.obdsh-dd-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-s, 8px);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-family: var(--font-interface);
+  padding: 5px 8px;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  transition: background 0.15s, color 0.15s;
+  box-sizing: border-box;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.obdsh-dd-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.obdsh-dd.is-open .obdsh-dd-btn {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.obdsh-dd-caret { font-size: 9px; opacity: 0.75; flex: 0 0 auto; }
+
+/* Custom dropdown panel styled to match Obsidian's native menu (like the "+" list). */
+.obdsh-dd-panel {
+  z-index: 50;
+  min-width: max-content;
+  max-width: 260px;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m, 8px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  padding: var(--size-2-1, 4px) 0;
+}
+.obdsh-dd-group {
+  font-size: var(--font-ui-smaller);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-faint);
+  padding: var(--size-2-2, 6px) var(--size-4-2, 12px);
+  font-weight: 600;
+  border-bottom: 1px solid var(--background-modifier-border);
+  margin-bottom: 4px;
+}
+.obdsh-dd-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
+  padding: var(--size-2-2, 6px) var(--size-4-2, 12px);
+  font-size: var(--font-ui-medium);
+  font-family: var(--font-interface);
+  color: var(--text-muted);
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  outline: none;
+}
+.obdsh-dd-item:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.obdsh-dd-item.is-selected {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+  font-weight: 400;
+}
+.obdsh-dd-empty { padding: var(--size-2-2, 6px) var(--size-4-2, 12px); color: var(--text-muted); font-size: var(--font-ui-smaller); }
+
+/* Context-usage info card (web-style) shown when clicking the ring */
+.obdsh-ctx-card {
+  min-width: 190px;
+  max-width: 230px;
+  padding: 10px 12px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.2);
+  font-family: var(--font-interface);
+}
+/* Header row: used-percent (left) + token totals (right, same line). */
+.obdsh-ctx-headrow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.obdsh-ctx-head {
+  font-size: var(--font-ui-medium);
+  font-weight: 700;
+  color: var(--text-normal);
+  white-space: nowrap;
+}
+.obdsh-ctx-sub {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  margin: 0;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+/* Progress bar showing fraction of the context window used. */
+.obdsh-ctx-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--background-modifier-border);
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+.obdsh-ctx-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--obdsh-brand), var(--obdsh-brand-2));
+  transition: width 0.2s ease;
+}
+.obdsh-ctx-list { display: flex; flex-direction: column; gap: 4px; }
+.obdsh-ctx-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+.obdsh-ctx-row span:last-child { color: var(--text-normal); font-variant-numeric: tabular-nums; }

@@ -159,6 +159,40 @@ export class DshHttpClient {
       maxMessages,
     });
   }
+
+  /** Execute a slash command (e.g. `/permission workspace-write`) on a session. */
+  async commandsExecute(sessionId: string, line: string) {
+    return this.callValue("commands/execute", {
+      args: { agentId: sessionId, line },
+    });
+  }
+
+  /** List available slash commands for a session. */
+  async commandsList(sessionId: string) {
+    return this.callValue("commands/list", {
+      args: { agentId: sessionId },
+    });
+  }
+
+  /** Cancel/stop the running turn on a session (web "Stop" behavior). */
+  async cancel(sessionId: string) {
+    return this.callValue("session.cancel", { sessionId });
+  }
+
+  /** Rename a session. */
+  async renameSession(sessionId: string, title: string) {
+    return this.callValue("session.rename", { sessionId, title });
+  }
+
+  /** Fork (branch) a new session from an existing one. */
+  async forkSession(sessionId: string) {
+    return this.callValue("session.fork", { sessionId });
+  }
+
+  /** Archive a session. */
+  async archiveSession(sessionId: string) {
+    return this.callValue("workspace.archiveSession", { sessionId });
+  }
 }
 
 /** Return a valid IANA timezone name, or null if unavailable. */
