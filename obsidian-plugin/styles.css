@@ -1,0 +1,398 @@
+/* dsh for Obsidian — DeepSeek web-inspired chat panel */
+
+/* ------------------------------------------------------------------ */
+/* Layout: single panel, full height column                            */
+/* The root IS the Obsidian `.view-content`. Make it fill the pane so   */
+/* the composer stays anchored to the bottom.                          */
+/* ------------------------------------------------------------------ */
+.obsidian-dsh-chat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Ensure the messages region can shrink and pushes composer to bottom. */
+.obsidian-dsh-chat > .obdsh-messages {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.obsidian-dsh-chat > .obdsh-composer {
+  flex: 0 0 auto;
+}
+
+/* Obsidian may give .view-content `overflow:auto` and no flex height;
+   force a definite height so 100% resolves correctly. */
+.view-content.obsidian-dsh-chat {
+  height: 100%;
+  overscroll-behavior: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Toolbar                                                             */
+/* ------------------------------------------------------------------ */
+.obdsh-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  flex: 0 0 auto;
+}
+
+.obdsh-toolbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
+}
+
+.obdsh-brand-mark {
+  color: var(--interactive-accent, #4d6bfe);
+  font-weight: 700;
+  font-size: 1.1em;
+}
+
+.obdsh-brand-title {
+  font-weight: 700;
+  font-size: var(--font-ui-medium);
+}
+
+.obdsh-brand-sub {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.obdsh-icon-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1em;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: var(--radius-s, 4px);
+  cursor: pointer;
+}
+
+.obdsh-icon-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+/* ------------------------------------------------------------------ */
+/* History panel (collapsible session list)                            */
+/* ------------------------------------------------------------------ */
+.obdsh-history {
+  flex: 0 0 auto;
+  max-height: 40%;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+
+.obdsh-history-empty {
+  padding: 10px 14px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.obdsh-history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 14px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+
+.obdsh-history-item:hover {
+  background: var(--background-modifier-hover);
+}
+
+.obdsh-history-item.is-active {
+  background: var(--background-modifier-hover);
+  border-left-color: var(--interactive-accent, #4d6bfe);
+}
+
+.obdsh-history-item-title {
+  font-size: var(--font-ui-smaller);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.obdsh-history-item-count {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  flex: 0 0 auto;
+}
+
+/* ------------------------------------------------------------------ */
+/* Messages                                                            */
+/* ------------------------------------------------------------------ */
+.obdsh-messages {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.obdsh-hint {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  margin: 12px 0;
+}
+
+/* Message row: avatar + bubble */
+.obdsh-msg {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  max-width: 100%;
+}
+
+.obdsh-avatar {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+.obdsh-avatar-user {
+  background: var(--interactive-accent, #4d6bfe);
+  color: #fff;
+}
+
+.obdsh-avatar-ai {
+  background: linear-gradient(
+    135deg,
+    var(--interactive-accent, #4d6bfe),
+    var(--interactive-accent-hover, #7a90ff)
+  );
+  color: #fff;
+}
+
+/* User bubble: right-aligned, brand-tinted */
+.obdsh-msg-user {
+  flex-direction: row-reverse;
+}
+
+.obdsh-msg-user .obdsh-bubble {
+  background: var(--interactive-accent, #4d6bfe);
+  color: var(--text-on-accent, #fff);
+  border-bottom-right-radius: 4px;
+}
+
+/* AI bubble: left-aligned, neutral */
+.obdsh-msg-assistant .obdsh-bubble {
+  background: var(--background-secondary);
+  border-bottom-left-radius: 4px;
+}
+
+.obdsh-bubble {
+  border-radius: 14px;
+  padding: 8px 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: var(--font-ui-small);
+  line-height: 1.5;
+  max-width: 100%;
+}
+
+/* Markdown content inside bubbles */
+.obdsh-bubble p {
+  margin: 0.4em 0;
+}
+
+.obdsh-bubble p:first-child {
+  margin-top: 0;
+}
+
+.obdsh-bubble p:last-child {
+  margin-bottom: 0;
+}
+
+.obdsh-bubble code {
+  font-size: 0.9em;
+}
+
+.obdsh-msg-user .obdsh-bubble p {
+  color: inherit;
+}
+
+/* Typing indicator */
+.obdsh-typing {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.obdsh-typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  animation: obdsh-blink 1.2s infinite ease-in-out;
+}
+
+.obdsh-typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.obdsh-typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes obdsh-blink {
+  0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); }
+  40% { opacity: 1; transform: scale(1); }
+}
+
+/* Streaming cursor */
+.obdsh-stream-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.obdsh-cursor {
+  display: inline-block;
+  color: var(--interactive-accent, #4d6bfe);
+  animation: obdsh-cursor-blink 0.8s steps(2) infinite;
+  font-weight: 700;
+}
+
+@keyframes obdsh-cursor-blink {
+  50% { opacity: 0; }
+}
+
+/* ------------------------------------------------------------------ */
+/* Composer                                                            */
+/* ------------------------------------------------------------------ */
+.obdsh-composer {
+  flex: 0 0 auto;
+  padding: 8px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.obdsh-composer-attach {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.obdsh-composer-attach label {
+  cursor: pointer;
+}
+
+.obdsh-input {
+  width: 100%;
+  resize: vertical;
+  min-height: 56px;
+  max-height: 200px;
+  margin: 0;
+  font: inherit;
+  font-size: var(--font-ui-medium);
+  padding: 8px 10px;
+}
+
+.obdsh-composer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.obdsh-btn {
+  border: none;
+  border-radius: var(--radius-m, 6px);
+  padding: 6px 14px;
+  font-size: var(--font-ui-medium);
+  cursor: pointer;
+}
+
+.obdsh-btn-primary {
+  background: var(--interactive-accent, #4d6bfe);
+  color: var(--text-on-accent, #fff);
+}
+
+.obdsh-btn-primary:hover {
+  background: var(--interactive-accent-hover, #3a56e0);
+}
+
+.obdsh-btn-ghost {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--background-modifier-border);
+}
+
+.obdsh-btn-ghost:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+/* Model selector (Phase 2) */
+.obdsh-model-btn {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 4px);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  padding: 3px 8px;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.obdsh-model-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+/* Cache-hit stats line under a reply */
+.obdsh-cache-stats {
+  margin-top: 6px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  opacity: 0.8;
+  border-top: 1px dashed var(--background-modifier-border);
+  padding-top: 5px;
+}
+
+/* Model picker modal */
+.obdsh-model-list-status {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.obdsh-model-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.obdsh-model-name {
+  font-size: var(--font-ui-medium);
+}

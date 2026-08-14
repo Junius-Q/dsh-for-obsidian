@@ -1,0 +1,14 @@
+# Build
+node_modules/
+main.js
+*.map
+
+# Data
+data.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

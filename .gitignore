@@ -1,0 +1,14 @@
+# Node
+node_modules/
+
+# Obsidian plugin build artifacts (generated in obsidian-plugin/)
+obsidian-plugin/main.js
+obsidian-plugin/*.map
+obsidian-plugin/data.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

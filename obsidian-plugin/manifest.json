@@ -1,0 +1,11 @@
+{
+  "id": "obsidian-dsh",
+  "name": "dsh for Obsidian",
+  "version": "0.1.0",
+  "minAppVersion": "1.8.7",
+  "description": "Use DeepSeek Harness (dsh) inside Obsidian — a Claudian-style local AI agent for your vault.",
+  "author": "dsh-for-obsidian",
+  "authorUrl": "",
+  "isDesktopOnly": true,
+  "fundingUrl": ""
+}
