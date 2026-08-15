@@ -1,44 +1,60 @@
 import { ChildProcess } from "child_process";
+import { requestUrl } from "obsidian";
 import { spawnDsh } from "./spawnDsh";
 import type { ObsidianDshSettings } from "../settings";
 
 /**
- * Manages a resident local `dsh --profile web` process. The plugin spawns the
- * dsh HTTP service on 127.0.0.1 (OS-chosen random port), waits until dsh prints
- * its URL, and exposes the base URL for a HTTP client to talk to.
+ * Manages a resident local `dsh --profile web` process.
+ *
+ * To avoid piling up a brand-new orphaned process on every plugin reload, the
+ * host prefers a FIXED loopback port (settings.httpPort, default 3080) and
+ * REUSES an already-listening dsh instance on that port when one exists — only
+ * spawning a child when nothing usable is listening there yet. When no fixed
+ * port is configured (0) it falls back to the old OS-chosen random-port
+ * behaviour (start a fresh process every time).
+ *
+ * "Adopted" hosts are external processes we did NOT spawn: we reuse their base
+ * URL but never kill them on stop().
  */
 export class DshHostManager {
   private child: ChildProcess | null = null;
   private baseUrl: string | null = null;
+  /** True when we adopted an already-running host (no child owned by us). */
+  private adopted = false;
   private awaitingStart: Array<{
     resolve: (url: string) => void;
     reject: (e: Error) => void;
     finish?: (fn?: () => void) => void;
   }> = [];
   private stdoutBuf = "";
-  private hadOutput = false;
+  private probing = false;
 
   constructor(private getSettings: () => ObsidianDshSettings) {}
 
-  /** Whether a host process is currently alive and has advertised a URL. */
+  /** Whether a host is currently usable (adopted or self-spawned). */
   isRunning(): boolean {
-    return !!this.child && this.baseUrl !== null;
+    return !!this.baseUrl && (this.adopted || !!this.child);
   }
 
-  /** The base URL of the running host, or null if not running. */
+  /** The base URL of the usable host, or null. */
   getBaseUrl(): string | null {
     return this.baseUrl;
   }
 
+  /** Resolve the fixed port from settings (0 disables fixed-port reuse). */
+  private desiredPort(): number {
+    const p = this.getSettings().httpPort;
+    return Number.isInteger(p) && p > 0 ? p : 0;
+  }
+
   /**
-   * Ensure the host is running, returning its base URL.
-   * If already running, resolves immediately with the cached URL.
-   * Rejects if the URL isn't advertised within `timeoutMs`.
+   * Ensure a usable host, returning its base URL.
+   * 1) reuse our own running child; 2) adopt an instance already listening on
+   * the fixed port; 3) spawn a fresh one (fixed port, else random).
    */
   async ensureStarted(timeoutMs = 30000): Promise<string> {
     if (this.isRunning() && this.baseUrl) return this.baseUrl;
-    // Queue a waiter, then arm a timeout so we never hang forever if the host
-    // spawns but never advertises a URL.
+
     return new Promise<string>((resolve, reject) => {
       let done = false;
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -46,7 +62,6 @@ export class DshHostManager {
         if (done) return;
         done = true;
         if (timer) clearTimeout(timer);
-        // remove this waiter from the queue
         const i = this.awaitingStart.findIndex((w) => w.finish === finish);
         if (i !== -1) this.awaitingStart.splice(i, 1);
         fn();
@@ -59,20 +74,80 @@ export class DshHostManager {
       this.awaitingStart.push(waiter);
       timer = setTimeout(() => {
         if (!done) {
-          const err = new Error(`Timed out waiting for dsh web to start after ${timeoutMs}ms`);
-          waiter.reject(err);
+          waiter.reject(
+            new Error(`Timed out waiting for dsh web to start after ${timeoutMs}ms`)
+          );
         }
       }, timeoutMs);
 
-      // If no child is running yet, kick off the spawn now.
-      if (!this.child && !this.isRunning()) {
-        void this.start();
-      }
+      void (async () => {
+        // (1) already usable?
+        if (this.isRunning() && this.baseUrl) {
+          waiter.resolve(this.baseUrl);
+          return;
+        }
+        // (2) something already listening on our fixed port?
+        const port = this.desiredPort();
+        if (port > 0 && !this.child && !this.probing) {
+          const adoptedUrl = await this.tryAdopt(port);
+          if (adoptedUrl) {
+            this.baseUrl = adoptedUrl;
+            this.adopted = true;
+            const waiters = this.awaitingStart;
+            this.awaitingStart = [];
+            waiters.forEach((w) => w.resolve(adoptedUrl));
+            return;
+          }
+        }
+        // (3) nothing usable — spawn.
+        if (!this.child) void this.start();
+      })();
     });
   }
 
-  /** Stop the host process if running. */
+  /**
+   * Probe an existing dsh web listener on `port` and adopt it if it answers
+   * like a live dsh host. Uses Obsidian's requestUrl (bypasses CSP).
+   */
+  private async tryAdopt(port: number): Promise<string | null> {
+    this.probing = true;
+    try {
+      const res = await requestUrl({
+        url: `http://127.0.0.1:${port}/api/host.describe`,
+        method: "POST",
+        contentType: "application/json",
+        body: JSON.stringify({
+          type: "client-request",
+          rpcId: "adopt-" + Math.random().toString(36).slice(2, 10),
+          method: "host.describe",
+          payload: {},
+        }),
+        throw: false,
+      });
+      if (res.status >= 200 && res.status < 300) {
+        const parsed = JSON.parse(res.text);
+        if (parsed?.result?.ok === true) {
+          return `http://127.0.0.1:${port}`;
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    } finally {
+      this.probing = false;
+    }
+  }
+
+  /** Stop the host. Adopted (external) hosts are left running — we only kill a child we spawned. */
   stop(): void {
+    if (this.adopted) {
+      // We reused an external process — do not kill it, just drop our refs.
+      this.adopted = false;
+      this.baseUrl = null;
+      this.awaitingStart.forEach((w) => w.reject(new Error("dsh host stopped")));
+      this.awaitingStart = [];
+      return;
+    }
     const child = this.child;
     this.child = null;
     this.baseUrl = null;
@@ -80,13 +155,8 @@ export class DshHostManager {
     this.awaitingStart = [];
     if (!child) return;
     if (process.platform === "win32" && child.pid) {
-      // On Windows we spawn via cmd.exe; killing only cmd leaves the dsh node
-      // child orphaned. Use taskkill to kill the whole process tree.
       try {
-        require("child_process").exec(
-          `taskkill /pid ${child.pid} /T /F`,
-          () => {}
-        );
+        require("child_process").exec(`taskkill /pid ${child.pid} /T /F`, () => {});
       } catch {
         /* ignore */
       }
@@ -95,32 +165,46 @@ export class DshHostManager {
     }
   }
 
+  /**
+   * Release our reference to the spawned dsh web process WITHOUT killing it, so
+   * it keeps running and a later reload can adopt it via the fixed port. Only
+   * safe when a fixed port is configured (the process must be reachable again).
+   */
+  detach(): void {
+    const child = this.child;
+    this.child = null;
+    this.baseUrl = null;
+    this.adopted = false;
+    this.awaitingStart.forEach((w) => w.reject(new Error("dsh host detached")));
+    this.awaitingStart = [];
+    // Intentionally do NOT kill `child`.
+    void child;
+  }
+
   private async start(): Promise<void> {
     const settings = this.getSettings();
     this.stdoutBuf = "";
-    this.hadOutput = false;
+    const port = this.desiredPort();
 
-    const child = spawnDsh(
-      settings.dshExecutable.trim() || "dsh",
-      ["--profile", "web", "--host", "127.0.0.1", "--port", "0", "--trusted-host", "127.0.0.1"],
-      {
-        cwd: settings.workingDir || undefined,
-      }
-    );
+    const args = ["--profile", "web", "--host", "127.0.0.1"];
+    args.push("--port", port > 0 ? String(port) : "0");
+    args.push("--trusted-host", "127.0.0.1");
+
+    const child = spawnDsh(settings.dshExecutable.trim() || "dsh", args, {
+      cwd: settings.workingDir || undefined,
+    });
     this.child = child;
 
     child.stdout?.on("data", (d: Buffer) => {
-      this.hadOutput = true;
       this.stdoutBuf += d.toString();
       this.tryExtractUrl();
     });
     child.stderr?.on("data", (d: Buffer) => {
-      this.hadOutput = true;
       this.stdoutBuf += d.toString();
       this.tryExtractUrl();
     });
     child.on("error", (err) => {
-      this.child = null;
+      if (this.child === child) this.child = null;
       this.failWaiters(new Error(`Failed to start dsh web: ${err.message}`));
     });
     child.on("close", (code) => {

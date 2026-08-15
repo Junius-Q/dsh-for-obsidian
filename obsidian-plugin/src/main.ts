@@ -13,6 +13,7 @@ import { DshBridge } from "./bridge/dshCli";
 import { PromptBuilder } from "./bridge/promptBuilder";
 import { DshHostManager } from "./bridge/dshHost";
 import { DshHttpClient } from "./bridge/dshHttp";
+import { DshMuxRelay } from "./bridge/dshMuxRelay";
 import { obsidianJsonPoster } from "./bridge/obsidianFetch";
 import { ChatView, VIEW_TYPE_CHAT } from "./panel/ChatView";
 import { NoteCommands } from "./commands/NoteCommands";
@@ -28,6 +29,8 @@ export default class ObsidianDsh extends Plugin {
   noteCommands!: NoteCommands;
   hostManager!: DshHostManager;
   http!: DshHttpClient;
+  /** Local node relay that subscribes to dsh's mux SSE stream for approvals/questions. */
+  muxRelay!: DshMuxRelay;
 
   constructor(app: App, manifest: PluginManifest) {
     super(app, manifest);
@@ -50,6 +53,7 @@ export default class ObsidianDsh extends Plugin {
       this.settings.timeoutMs,
       obsidianJsonPoster
     );
+    this.muxRelay = new DshMuxRelay();
 
     // Chat view
     this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(leaf, this));
@@ -86,7 +90,13 @@ export default class ObsidianDsh extends Plugin {
 
   onunload(): void {
     this.bridge.abortAll();
-    this.hostManager?.stop();
+    this.muxRelay?.stop();
+    if (this.settings.killWebOnUnload) {
+      this.hostManager?.stop();
+    } else {
+      // Keep the spawned dsh web running (reusable via the fixed port next start).
+      this.hostManager?.detach();
+    }
   }
 
   async openChatView(): Promise<void> {
@@ -128,6 +138,25 @@ export default class ObsidianDsh extends Plugin {
   async saveSessions<T>(sessions: T[]): Promise<void> {
     const data = ((await this.loadData()) as Record<string, unknown>) || {};
     data.chatSessions = sessions;
+    await this.saveData(data);
+  }
+
+  /** Load which chat session was active when last saved (falls back to ""). */
+  async loadActiveChatId(): Promise<string> {
+    const raw = (await this.loadData()) as Record<string, unknown> | null;
+    const id = raw && typeof raw.activeChatId === "string" ? raw.activeChatId : "";
+    return id;
+  }
+
+  /** Persist the currently active chat session id for restoration on reopen. */
+  async saveActiveChatId(id: string): Promise<void> {
+    const data = ((await this.loadData()) as Record<string, unknown>) || {};
+    if (!id) delete data.activeChatId;
+    else data.activeChatId = id;
+    // Carry over persisted sessions so we never wipe them.
+    if (data.chatSessions === undefined && this.settings) {
+      // nothing to do — saveSettings/history already persists chatSessions
+    }
     await this.saveData(data);
   }
 }

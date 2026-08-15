@@ -68,6 +68,51 @@ export class DshHttpClient {
     return this.baseUrl;
   }
 
+  /** The live base URL, ensuring the host is running first. */
+  async ensureUrl(): Promise<string> {
+    await this.connect();
+    return this.baseUrl!;
+  }
+
+  /**
+   * Answer a host-initiated `server-request` (an approval or a question asked
+   * of the user). This is the "reverse" half of the RPC model: the host pushed
+   * a frame with a stable `rpcId` over the mux stream, and we reply by POSTing
+   * a `client-response` that echoes that `rpcId`. Returns the carrier receipt
+   * (`accepted: true`, or a not-pending/bad-response reason).
+   *
+   * When `error` is provided the client-response is `{ok:false, error}` — the
+   * host resolves the ask as cancelled (used for closing a question request).
+   */
+  async respond(
+    rpcId: string,
+    value: unknown,
+    error?: { code: string; message: string; details: unknown }
+  ): Promise<{ accepted: boolean; reason?: string }> {
+    await this.connect();
+    const base = this.baseUrl!;
+    const body = JSON.stringify({
+      type: "client-response",
+      rpcId,
+      result: error ? { ok: false, error } : { ok: true, value },
+    });
+    const res = await this.postJson(`${base}/api/respond`, body);
+    if (res.status >= 400) {
+      throw new Error(`dsh api respond http ${res.status}`);
+    }
+    let obj: unknown;
+    try {
+      obj = JSON.parse(res.text);
+    } catch {
+      obj = { accepted: false, reason: "malformed-response" };
+    }
+    const r = obj as { accepted?: boolean; reason?: string };
+    return {
+      accepted: r.accepted === true,
+      ...(r.reason === undefined ? {} : { reason: r.reason }),
+    };
+  }
+
   /**
    * Perform a unary RPC call: `POST /api/<method>`.
    * Resolves the decoded `server-response` envelope (throws only on transport/

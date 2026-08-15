@@ -18,6 +18,10 @@ export interface ObsidianDshSettings {
   defaultWriteMode: "append" | "overwrite_selection" | "insert_cursor" | "new_note";
   /** Timeout (ms) for a single headless call. */
   timeoutMs: number;
+  /** Fixed loopback port for the resident dsh web host (0 = random). Reused across reloads. */
+  httpPort: number;
+  /** Whether to kill the dsh web process we spawned when the plugin unloads. */
+  killWebOnUnload: boolean;
 }
 
 export const DEFAULT_SETTINGS: ObsidianDshSettings = {
@@ -28,6 +32,8 @@ export const DEFAULT_SETTINGS: ObsidianDshSettings = {
   contextLimitChars: 8000,
   defaultWriteMode: "append",
   timeoutMs: 120000,
+  httpPort: 3080,
+  killWebOnUnload: true,
 };
 
 export class ObsidianDshSettingTab extends PluginSettingTab {
@@ -53,58 +59,56 @@ export class ObsidianDshSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl("h2", { text: "dsh for Obsidian — Settings" });
+    containerEl.createEl("h2", { text: t("settingsTitle") });
 
     // DeepSeek API key — written to dsh's own ~/.dsh/.credentials.yaml so it
     // works everywhere (plugin, CLI, web) with one entry.
     containerEl.createEl("h3", {
-      text: isKeyConfigured() ? "DeepSeek API Key（已配置）" : "DeepSeek API Key",
+      text: isKeyConfigured()
+        ? `${t("keyConfiguredPrefix")}（${t("keyConfigured")}）`
+        : t("keyConfiguredPrefix"),
     });
-    const keyDesc = isKeyConfigured()
-      ? "已写入 dsh 配置文件（插件/CLI/web 通用）。输入新值并保存可覆盖；留空可清除。"
-      : "未配置。填入 DeepSeek API key 并保存，会写入 dsh 配置文件（插件/CLI/web 通用）。";
+    const keyDesc = isKeyConfigured() ? t("keyDescConfigured") : t("keyDescNotConfigured");
     const keyStatus = containerEl.createEl("div", {
-      text: isKeyConfigured() ? "✓ 已配置" : "○ 未配置",
+      text: isKeyConfigured() ? `✓ ${t("keyConfigured")}` : `○ ${t("keyNotConfigured")}`,
       cls: "setting-item-description",
     });
     void keyStatus;
     new Setting(containerEl)
-      .setName("DeepSeek API key")
+      .setName(t("keyConfiguredPrefix"))
       .setDesc(keyDesc)
       .addText((text) => text.setPlaceholder("sk-…").inputEl.setAttribute("type", "password"))
       .addButton((btn) =>
-        btn.setButtonText("保存").onClick(async () => {
+        btn.setButtonText(t("save")).onClick(async () => {
           const comp = btn.buttonEl.closest(".setting-item")?.querySelector("input");
           const val = (comp as HTMLInputElement | null)?.value?.trim() ?? "";
           if (!val) {
-            new Notice("未输入 key，未做更改（如需清除请使用「清除」）");
+            new Notice(t("keyEmptyNotice"));
             return;
           }
           const saved = setStoredKey(val);
-          new Notice(saved ? "已保存到 dsh 配置文件（全局生效）" : "保存失败，请检查配置目录权限");
-          if (keyStatus) keyStatus.textContent = saved ? "✓ 已配置" : "○ 保存失败";
+          new Notice(saved ? t("keySavedNotice") : t("keySaveFailedNotice"));
+          if (keyStatus)
+            keyStatus.textContent = saved ? `✓ ${t("keyConfigured")}` : `○ ${t("keySaveFailedNotice")}`;
         })
       )
       .addButton((btn) =>
-        btn.setButtonText("清除").onClick(() => {
-          const msg = "清除已保存的 DeepSeek API key？";
-          new ConfirmModal(this.app, msg, () => {
+        btn.setButtonText(t("clear")).onClick(() => {
+          new ConfirmModal(this.app, t("keyClearConfirmMsg"), () => {
             const cleared = setStoredKey(null);
-            new Notice(cleared ? "已清除" : "清除失败");
-            if (keyStatus) keyStatus.textContent = "○ 未配置";
+            new Notice(cleared ? t("keyCleared") : t("keyClearFailed"));
+            if (keyStatus) keyStatus.textContent = `○ ${t("keyNotConfigured")}`;
           }).open();
         })
       );
 
     new Setting(containerEl)
-      .setName("配置位置")
-      .setDesc(`Key 写入 dsh 配置文件：\`${credentialsPath()}\``);
+      .setName(t("keyLocation"))
+      .setDesc(`${t("keyLocationDesc")}\`${credentialsPath()}\``);
 
     new Setting(containerEl)
-      .setName("dsh executable")
-      .setDesc(
-        "Command or absolute path to the dsh CLI. Defaults to `dsh`. Install it with: npm i -g @deepseek-ai/dsh"
-      )
+      .setName(t("stExecutable"))
+      .setDesc(t("stExecutableDesc"))
       .addText((text) =>
         text
           .setPlaceholder("dsh")
@@ -116,8 +120,8 @@ export class ObsidianDshSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("dsh profile")
-      .setDesc("Profile to boot. Phase 1 uses the headless profile.")
+      .setName(t("stProfile"))
+      .setDesc(t("stProfileDesc"))
       .addText((text) =>
         text
           .setPlaceholder("headless")
@@ -129,14 +133,11 @@ export class ObsidianDshSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Working directory")
-      .setDesc(
-        "Folder dsh treats as its workspace (where 'workspace-write' applies). Leave empty to follow the CURRENT vault — swapping vaults or machines automatically re-targets it. Currently: " +
-          this.currentVaultPath()
-      )
+      .setName(t("stWorkingDir"))
+      .setDesc(`${t("stWorkingDirDesc")} ${this.currentVaultPath()}`)
       .addText((text) =>
         text
-          .setPlaceholder("(follow current vault)")
+          .setPlaceholder(t("stWorkingDirPlaceholder"))
           .setValue(this.plugin.settings.workingDir)
           .onChange(async (value) => {
             this.plugin.settings.workingDir = value.trim();
@@ -145,8 +146,8 @@ export class ObsidianDshSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Include active note")
-      .setDesc("Automatically attach the active note's content to chat prompts.")
+      .setName(t("stIncludeNote"))
+      .setDesc(t("stIncludeNoteDesc"))
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.includeActiveNote)
@@ -157,8 +158,8 @@ export class ObsidianDshSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Context limit (chars)")
-      .setDesc("Maximum characters of note context attached to a prompt.")
+      .setName(t("stContextLimit"))
+      .setDesc(t("stContextLimitDesc"))
       .addText((text) =>
         text
           .setPlaceholder("8000")
@@ -173,14 +174,14 @@ export class ObsidianDshSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Default write-back")
-      .setDesc("Where command results (e.g. Summarize) are written by default.")
+      .setName(t("stWriteback"))
+      .setDesc(t("stWritebackDesc"))
       .addDropdown((dropdown) =>
         dropdown
-          .addOption("append", "Append to note")
-          .addOption("overwrite_selection", "Overwrite selection")
-          .addOption("insert_cursor", "Insert at cursor")
-          .addOption("new_note", "New note")
+          .addOption("append", t("wbAppend"))
+          .addOption("overwrite_selection", t("wbOverwrite"))
+          .addOption("insert_cursor", t("wbInsert"))
+          .addOption("new_note", t("wbNewNote"))
           .setValue(this.plugin.settings.defaultWriteMode)
           .onChange(async (value) => {
             this.plugin.settings.defaultWriteMode = value as ObsidianDshSettings["defaultWriteMode"];
@@ -189,8 +190,8 @@ export class ObsidianDshSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Timeout (ms)")
-      .setDesc("Maximum wait for a single dsh call before aborting.")
+      .setName(t("stTimeout"))
+      .setDesc(t("stTimeoutDesc"))
       .addText((text) =>
         text
           .setPlaceholder("120000")
@@ -201,6 +202,32 @@ export class ObsidianDshSettingTab extends PluginSettingTab {
               this.plugin.settings.timeoutMs = n;
               await this.plugin.saveSettings();
             }
+          })
+      );
+
+    new Setting(containerEl)
+      .setName(t("stPort"))
+      .setDesc(t("stPortDesc"))
+      .addText((text) =>
+        text
+          .setPlaceholder(t("stPortPlaceholder"))
+          .setValue(String(this.plugin.settings.httpPort))
+          .onChange(async (value) => {
+            const n = parseInt(value, 10);
+            this.plugin.settings.httpPort = !isNaN(n) && n >= 0 ? n : 0;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName(t("stKillWeb"))
+      .setDesc(t("stKillWebDesc"))
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.killWebOnUnload)
+          .onChange(async (value) => {
+            this.plugin.settings.killWebOnUnload = value;
+            await this.plugin.saveSettings();
           })
       );
 
