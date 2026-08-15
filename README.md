@@ -35,6 +35,10 @@ Unlike "cloud-shell" plugins, dsh runs entirely locally — **local shell + loca
 - **Connection test** — Settings includes a one-click test of the dsh CLI.
 - **Local & private** — no remote model call from the plugin; dsh runs on your machine.
 - **Bilingual UI** — the panel auto-follows the Obsidian app language (English / Chinese). Requires Obsidian **1.8.7+**.
+- **Real approvals & questions** — dsh's approval and user-question flows are wired through the real protocol: a local WebSocket relay subscribes to the mux stream, the plugin renders web-style decision cards, and your answer goes straight back to dsh (survives reloads).
+- **Message send queue** — keep typing while a turn runs; messages queue into a pending-sends card and send in order (edit / remove / send-now).
+- **Process detail that persists** — tool calls and thinking are recorded and survive restarts, so replaying a session shows the same detail as live.
+- **One dsh, reuse it** — a fixed loopback port (default 3080) reuses an already-running dsh instead of stacking a new process per reload (configurable in Settings).
 
 ## Requirements
 
@@ -97,7 +101,7 @@ dsh --profile headless "your task"
 
 ## Status
 
-Working Phase 2 plugin: chat panel over a resident local dsh HTTP service (streaming, model/permission/reasoning controls, session history), with note commands and a headless fallback. See [`design/ARCHITECTURE.md`](design/ARCHITECTURE.md) and [`design/ROADMAP.md`](design/ROADMAP.md).
+Working Phase 2 plugin: chat panel over a resident local dsh HTTP service (streaming, model/permission/reasoning controls, session history, real approvals/questions, message send queue, multi-step replies, and persisted process detail), with note commands and a headless fallback. See [`design/ARCHITECTURE.md`](design/ARCHITECTURE.md) and [`design/ROADMAP.md`](design/ROADMAP.md).
 
 ## License
 

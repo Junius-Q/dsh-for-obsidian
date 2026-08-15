@@ -35,6 +35,10 @@
 - **连接测试** — 设置里提供一键测试 dsh CLI。
 - **本地与隐私** — 插件不调用远程模型；dsh 在你的机器上运行。
 - **双语 UI** — 面板自动跟随 Obsidian 界面语言（英文 / 中文）。需要 Obsidian **1.8.7+**。
+- **真实审批 / 提问** — 打通 dsh 真实协议：插件用本地 WebSocket 中继订阅 mux 流，把答题卡、审批卡渲染成网页风格控件，并把你的选择直接应答回 dsh（重载后依然工作）。
+- **消息发送队列** — 生成时也能继续输入：消息进入"待发送"卡片，按序逐条发送（可编辑 / 删除 / 立即发送）。
+- **过程留档** — 工具调用与思考过程会记录并随会话保存，重启后回放仍可看到同样细节。
+- **复用已运行的 dsh** — 固定回环端口（默认 3080）复用已存在的 dsh、避免每次重载堆积新进程；在设置中可配置。
 
 ## 环境要求
 
@@ -97,7 +101,7 @@ dsh --profile headless "your task"
 
 ## 状态
 
-可用的 Phase 2 插件：聊天面板基于常驻本地 dsh HTTP 服务（流式、模型/权限/推理控制、会话历史），并带有笔记命令和 headless 回退。详见 [`design/ARCHITECTURE.md`](design/ARCHITECTURE.md) 与 [`design/ROADMAP.md`](design/ROADMAP.md)。
+可用的 Phase 2 插件：聊天面板基于常驻本地 dsh HTTP 服务（流式、模型/权限/推理控制、会话历史、真实审批/提问、消息发送队列、多步回复、过程留档），并带有笔记命令和 headless 回退。详见 [`design/ARCHITECTURE.md`](design/ARCHITECTURE.md) 与 [`design/ROADMAP.md`](design/ROADMAP.md)。
 
 ## 许可
 
