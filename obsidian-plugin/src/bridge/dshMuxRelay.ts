@@ -70,31 +70,44 @@ export interface SessionEventSubscribe {
 }
 
 /**
- * node -e script: open the dsh mux stream over **WebSocket** and echo each
- * `server-request` frame (a complete JSON message) to stdout as a line.
+ * node -e script: open the dsh mux stream over **WebSocket** and echo ONLY the
+ * frames the plugin consumes (approval/question requests, tool calls, reasoning
+ * chunks) to stdout as a line. Everything else — the overwhelming majority
+ * (assistant/chunk text deltas, session/subscribed, inbox spliced, …) — is
+ * dropped INSIDE the child so it never crosses stdout/the main thread.
  *
  * The local dsh web service answers `GET /api/events.mux` with `426 Upgrade
- * Required` (`Upgrade: websocket`) — the mux stream is WebSocket transport,
- * NOT plain SSE. Obsidian's renderer blocks WebSocket to localhost, but this
- * relay runs as a plain `node` child process (Node 20+ ships a global
- * WebSocket), so the plugin can subscribe from inside its main thread.
+ * Required` (`Upgrade: websocket`) — the mux stream is WebSocket transport, not
+ * plain SSE. Obsidian's renderer blocks WebSocket to localhost, but this relay
+ * runs as a plain `node` child process (Node 20+ ships a global WebSocket).
  *
- * We print each message as a single `@`-prefixed JSON line so the parent can
- * split on `\n` reliably (JSON never contains a raw newline). On close/error
- * we back off briefly and reopen — dsh replays still-pending
- * approval/question frames with the same rpcId on (re)connect, so reconnect
- * is safe and idempotent.
+ * We print each kept message as a single `@`-prefixed JSON line (JSON never
+ * contains a raw newline). On close/error we back off briefly and reopen — dsh
+ * replays still-pending approval/question frames with the same rpcId, so
+ * reconnect is idempotent.
  */
 function relayScript(baseUrl: string): string {
   const url = `${baseUrl.replace(/\/$/, "")}/api/events.mux`;
   return [
     "const u=" + JSON.stringify(url) + ";",
     "const sleep=ms=>new Promise(r=>setTimeout(r,ms));",
+    "function keep(m){" +
+      "var p=m.payload||{},method=m.method||p.type;",
+      "if(method==='session/event'){",
+      "var et=p.event&&p.event.type;",
+      "if(et==='tool/call')return true;",
+      "if(et==='assistant/chunk'){var c=p.event&&p.event.data&&p.event.data.chunk;",
+      "return !!(c&&c.block&&c.block.type==='reasoning');}",
+      "return false;}",
+      "return method==='approval/requested'||method==='approval/resolved'||",
+      "method==='question/requested'||method==='question/resolved'||",
+      "method==='stream/error';}",
     "async function open(){",
     "try{",
     "const ws=new WebSocket(u);",
-    "ws.onmessage=(ev)=>{const s=String(ev.data);" +
-      "if(s)process.stdout.write('@'+s.replace(/\\n/g,'')+'\\n');};",
+    "ws.onmessage=(ev)=>{try{var m=JSON.parse(String(ev.data));",
+      "if(m&&m.type==='server-request'&&keep(m)){process.stdout.write('@'+JSON.stringify(m).replace(/\\n/g,'')+'\\n');}",
+      "}catch(e){};};",
     // Wait until the socket closes (or fails to open within 2s), then reopen.
     "await new Promise(resolve=>{",
     "let startTo=setTimeout(()=>{try{ws.close(1011)}catch(e){}},2000);",
