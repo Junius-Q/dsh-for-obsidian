@@ -1,4 +1,4 @@
-# dsh for Obsidian
+# DeepSeek Harness Obsidian 插件
 
 > [**English**](README.md) · **中文**
 

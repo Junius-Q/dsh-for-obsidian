@@ -1,4 +1,4 @@
-# dsh for Obsidian
+# DeepSeek Harness for Obsidian
 
 > **English** · [**中文 (Chinese)**](README.zh.md)
 
