@@ -231,6 +231,7 @@ body .menu.obdsh-dd-open .menu-item {
 
 /* Bubble — with a soft, consistent shadow on both sides */
 .obdsh-bubble {
+  position: relative; /* anchor copy button to the bubble, not the whole row */
   border-radius: var(--obdsh-radius-bubble);
   padding: 10px 14px;
   white-space: pre-wrap;
@@ -250,6 +251,7 @@ body .menu.obdsh-dd-open .menu-item {
 }
 .obdsh-msg-assistant .obdsh-bubble {
   background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
   border-bottom-left-radius: 6px;
 }
 
@@ -259,7 +261,14 @@ body .menu.obdsh-dd-open .menu-item {
 .obdsh-bubble p:last-child { margin-bottom: 0; }
 .obdsh-bubble ul, .obdsh-bubble ol { margin: 0.4em 0; padding-left: 1.4em; }
 .obdsh-bubble code { font-size: 0.9em; background: color-mix(in srgb, var(--background-modifier-border) 50%, transparent); border-radius: 4px; padding: 0.1em 0.3em; }
-.obdsh-bubble pre { background: var(--background-modifier-accent); padding: 8px 10px; border-radius: 8px; overflow-x: auto; }
+.obdsh-bubble pre {
+  background: var(--code-background, var(--background-secondary));
+  color: var(--text-normal, var(--code-normal));
+  border: 1px solid var(--background-modifier-border);
+  padding: 8px 10px;
+  border-radius: 8px;
+  overflow-x: auto;
+}
 .obdsh-msg-user .obdsh-bubble p { color: inherit; }
 .obdsh-msg-user .obdsh-bubble a { color: #fff; }
 
@@ -478,6 +487,23 @@ textarea.obdsh-input:not(:focus):placeholder-shown + .obdsh-send:not(.obdsh-stop
 }
 .obdsh-btn-ghost:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
 
+/* Option button (approve / answer / selectable choice). */
+.obdsh-btn-opt {
+  background: color-mix(in srgb, var(--obdsh-brand) 12%, transparent);
+  color: var(--obdsh-brand);
+  border: 1px solid color-mix(in srgb, var(--obdsh-brand) 35%, transparent);
+}
+.obdsh-btn-opt:hover { background: color-mix(in srgb, var(--obdsh-brand) 22%, transparent); }
+.obdsh-btn-opt.obdsh-selected {
+  background: var(--obdsh-brand);
+  color: #fff !important;
+  -webkit-text-fill-color: #fff;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--obdsh-brand) 40%, transparent);
+}
+
+.obdsh-decision-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.obdsh-decision-actions .obdsh-btn { padding: 6px 14px; font-size: var(--font-ui-smaller); }
+
 /* ------------------------------------------------------------------ */
 /* Model selector (deprecated — now a <select>, see .obdsh-select/.obdsh-model-select) */
 
@@ -500,9 +526,12 @@ textarea.obdsh-input:not(:focus):placeholder-shown + .obdsh-send:not(.obdsh-stop
   position: relative;
 }
 .obdsh-copy-btn {
+  /* Fixed just OUTSIDE the bubble, beside the text — not at the message-row
+     edge, not overlapping the message. Anchors to .obdsh-bubble (relative). */
   position: absolute;
   top: 4px;
-  right: 4px;
+  left: 100%;
+  margin-left: 6px;
   background: var(--background-primary);
   border: 1px solid var(--background-modifier-border);
   border-radius: 6px;
@@ -514,6 +543,7 @@ textarea.obdsh-input:not(:focus):placeholder-shown + .obdsh-send:not(.obdsh-stop
   opacity: 0;
   transition: opacity 0.15s, background 0.15s;
   z-index: 2;
+  white-space: nowrap;
 }
 .obdsh-msg:hover .obdsh-copy-btn { opacity: 0.9; }
 .obdsh-copy-btn:hover {
@@ -521,10 +551,12 @@ textarea.obdsh-input:not(:focus):placeholder-shown + .obdsh-send:not(.obdsh-stop
   background: var(--background-modifier-hover);
   color: var(--text-normal);
 }
-/* Keep user messages' copy button offset to the left side (row-reversed). */
+/* User messages (bubble on the right) get the copy button just LEFT of the bubble. */
 .obdsh-msg-user .obdsh-copy-btn {
-  right: auto;
-  left: 4px;
+  left: auto;
+  right: 100%;
+  margin-left: 0;
+  margin-right: 6px;
 }
 
 /* Ensure conversation text can always be selected/copied. */
@@ -755,3 +787,331 @@ textarea.obdsh-input:not(:focus):placeholder-shown + .obdsh-send:not(.obdsh-stop
   color: var(--text-muted);
 }
 .obdsh-ctx-row span:last-child { color: var(--text-normal); font-variant-numeric: tabular-nums; }
+
+/* ------------------------------------------------------------------ */
+/* Approval / question decision cards (requested over the mux relay)   */
+/* ------------------------------------------------------------------ */
+.obdsh-decision-card {
+  border: 1px solid color-mix(in srgb, var(--obdsh-brand) 30%, transparent);
+  background: color-mix(in srgb, var(--obdsh-brand) 6%, transparent);
+  padding: 12px 14px;
+}
+.obdsh-decision-kind {
+  font-size: var(--font-ui-smaller);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--obdsh-brand);
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.obdsh-decision-prompt {
+  font-size: var(--font-ui-small);
+  color: var(--text-normal);
+  line-height: 1.45;
+}
+.obdsh-question-group { margin-top: 8px; }
+.obdsh-question-header { font-weight: 600; margin-bottom: 2px; }
+.obdsh-question-text { font-size: var(--font-ui-small); }
+.obdsh-question-detail {
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.obdsh-decision-pending {
+  opacity: 0.55;
+  pointer-events: none;
+  filter: grayscale(0.4);
+}
+.obdsh-decision-resolved .obdsh-decision-kind::after {
+  content: " ✓";
+  color: var(--color-green, #4caf50);
+}
+
+/* ------------------------------------------------------------------ */
+/* Question flow (dsh-web style: one question at a time)               */
+/* ------------------------------------------------------------------ */
+/* Full-view overlay seat (web composer takeover): covers the whole chat view,
+   dims the panels behind, and centers the decision card. HIDDEN by default —
+   only `.is-visible` turns it on, so it never intercepts clicks when idle. */
+.obdsh-decision-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: none; /* default off; see .is-visible below */
+}
+.obdsh-decision-layer.is-visible {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 16px;
+  background: color-mix(in srgb, var(--background-primary) 72%, transparent);
+  backdrop-filter: blur(2px);
+}
+.obdsh-decision-layer .obdsh-decision-card {
+  width: 100%;
+  max-width: 640px;
+  max-height: 78%;
+  display: flex;
+  flex-direction: column;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 16px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  padding: 0;
+  overflow: hidden;
+}
+
+/* Approval card inner spacing (the question flow supplies its own insets). */
+.obdsh-approval-card .obdsh-decision-kind { padding: 16px 18px 0; }
+.obdsh-approval-card .obdsh-decision-prompt { padding: 0 18px; margin: 8px 0 2px; }
+.obdsh-approval-card .obdsh-decision-actions { padding: 6px 18px 16px; }
+
+.obdsh-qheader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px 4px 18px;
+}
+.obdsh-qhead-block { min-width: 0; }
+.obdsh-qtitle {
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 600;
+  color: var(--text-normal);
+  word-break: break-word;
+}
+.obdsh-icon-btn.obdsh-qclose {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 4px;
+  border-radius: 50%;
+}
+.obdsh-icon-btn.obdsh-qclose:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+
+.obdsh-qbody {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 12px 6px;
+  max-height: 42vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.obdsh-qgroup { display: flex; flex-direction: column; }
+.obdsh-qoptions {
+  display: flex;
+  flex-direction: column; /* web official: one full-width, shrink-proof row per option */
+  gap: 2px;
+  margin-top: 6px;
+}
+.obdsh-qoption {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  flex-shrink: 0; /* never let the flex row be compressed/truncated */
+  padding: 9px 12px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-normal);
+  font-size: 14px;
+  font-weight: 500;
+  text-align: left;
+  line-height: 1.5;
+  cursor: pointer;
+  transition: background-color 120ms;
+}
+.obdsh-qoption:hover:not(:disabled) {
+  background: var(--background-modifier-hover);
+}
+.obdsh-qoption.obdsh-selected {
+  background: color-mix(in srgb, var(--obdsh-brand) 14%, transparent);
+}
+.obdsh-qoption.obdsh-selected .obdsh-qopt-label { color: var(--obdsh-brand); }
+.obdsh-qopt-num {
+  flex: 0 0 auto;
+  min-width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: var(--background-modifier-border);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  margin-top: 3px;
+}
+.obdsh-qopt-copy { flex: 1 1 auto; min-width: 0; display: block; white-space: normal; overflow-wrap: anywhere; }
+.obdsh-qopt-label { line-height: 1.5; font-weight: 500; white-space: normal; overflow-wrap: anywhere; }
+.obdsh-qopt-check {
+  color: var(--obdsh-brand);
+  font-size: 14px;
+  font-weight: 700;
+  flex: 0 0 auto;
+  margin-top: 3px;
+}
+
+.obdsh-qcustom {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: none; /* invisible until focused — no extra box inside the card */
+  border-bottom: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: transparent;
+  transition: border-color 100ms;
+}
+.obdsh-qcustom:focus-within, .obdsh-qcustom.obdsh-qcustom-active {
+  border-bottom-color: color-mix(in srgb, var(--obdsh-brand) 55%, transparent);
+}
+.obdsh-qcustom-input {
+  width: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-normal);
+  font: inherit;
+  font-size: 13px;
+}
+.obdsh-qcustom-input::placeholder { color: var(--text-muted); }
+
+.obdsh-qfooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px 12px;
+}
+.obdsh-pager { display: flex; align-items: center; gap: 6px; }
+.obdsh-pager-btn {
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 50%;
+  color: var(--text-muted);
+  width: 24px; height: 24px;
+  cursor: pointer;
+  font-size: 14px; line-height: 1;
+}
+.obdsh-pager-btn:hover:not(:disabled) { background: var(--background-modifier-hover); color: var(--text-normal); }
+.obdsh-pager-btn:disabled { opacity: 0.4; cursor: default; }
+.obdsh-progress { font-size: 13px; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
+
+.obdsh-qfeedback {
+  flex: 1;
+  min-height: 16px;
+  font-size: 12px;
+  color: var(--color-red, #e03131);
+  text-align: right;
+}
+.obdsh-decision-actions.obdsh-qactions { margin-top: 0; gap: 8px; flex-shrink: 0; }
+.obdsh-qactions .obdsh-btn { padding: 6px 14px; font-size: var(--font-ui-smaller); }
+
+/* Pending-sends queue card (web-style) */
+.obdsh-queue-card {
+  margin: 8px 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
+  background: var(--background-secondary);
+}
+.obdsh-queue-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.obdsh-queue-title {
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.obdsh-queue-clear {
+  display: grid; place-items: center;
+  background: transparent; border: none; border-radius: 6px;
+  color: var(--text-muted); cursor: pointer; padding: 3px;
+}
+.obdsh-queue-clear:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.obdsh-queue-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 55%, transparent);
+}
+.obdsh-queue-item:first-child { border-top: none; }
+.obdsh-queue-idx { color: var(--text-muted); font-size: var(--font-ui-smaller); flex: 0 0 auto; }
+.obdsh-queue-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--font-ui-small);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.obdsh-queue-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+.obdsh-queue-action {
+  display: grid; place-items: center;
+  width: 24px; height: 24px;
+  background: transparent; border: none; border-radius: 6px;
+  color: var(--text-muted); cursor: pointer;
+  transition: background-color 120ms, color 120ms, opacity 120ms;
+}
+.obdsh-queue-action:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.obdsh-queue-go { color: var(--obdsh-brand); }
+.obdsh-queue-go:hover { color: var(--obdsh-brand); background: color-mix(in srgb, var(--obdsh-brand) 14%, transparent); }
+/* Web-style: row actions are dimmed until the row is hovered. */
+.obdsh-queue-actions { opacity: 0.35; }
+.obdsh-queue-item:hover .obdsh-queue-actions { opacity: 1; }
+.obdsh-queue-editor {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--background-modifier-hover);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 3px 6px;
+  font-size: var(--font-ui-small);
+}
+.obdsh-queue-hint { margin-top: 6px; font-size: var(--font-ui-smaller); color: var(--text-muted); }
+
+/* Live execution detail chips (tool calls / thinking) streamed from mux. */
+.obdsh-process-chip {
+  margin: 2px 10px;
+  padding: 4px 10px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  background: var(--background-secondary);
+  border-left: 2px solid color-mix(in srgb, var(--obdsh-brand) 40%, transparent);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+/* Replay container for a message's stored execution detail: takes its own row
+   (so it can't push the avatar/bubble aside) and uses the same margins as the
+   live chips, so replay looks identical to what was shown live (no right shift). */
+.obdsh-process-strip {
+  flex: 0 0 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 10px;
+  min-width: 0;
+}
+.obdsh-process-strip .obdsh-process-chip {
+  margin: 0;
+}
+
+
+
