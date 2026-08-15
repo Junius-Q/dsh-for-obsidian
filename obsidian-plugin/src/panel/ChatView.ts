@@ -3,6 +3,7 @@ import type ObsidianDsh from "../main";
 import { CustomDropdown } from "./CustomDropdown";
 import { t } from "../i18n";
 import { isKeyConfigured, setStoredKey } from "../bridge/dshConfig";
+import type { RelayFrame, SessionEventSubscribe } from "../bridge/dshMuxRelay";
 
 export const VIEW_TYPE_CHAT = "obsidian-dsh-chat";
 
@@ -13,11 +14,30 @@ const SEND_ICON =
 const STOP_ICON =
   '<svg viewBox="0 0 24 24" width="16" height="16" fill="#fff" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
 
+/* Queue-row action icons (dsh-web style outlines). */
+const ICON_EDIT =
+  '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 3 21l.5-4.5z"/></svg>';
+const ICON_TRASH =
+  '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/><path d="M10 11v6M14 11v6"/></svg>';
+const ICON_SEND =
+  '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg>';
+const ICON_CHECK =
+  '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
+const ICON_CLOSE =
+  '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+
 interface ChatMessage {
   role: "user" | "assistant";
   text: string;
   /** Optional reasoning (thinking) text, shown in a separate collapsible block. */
   reasoning?: string;
+  /** Ordered execution detail (tool calls / thinking) that led to this reply. */
+  process?: Array<{ kind: "tool" | "think"; text: string }>;
+}
+
+interface ProcessItem {
+  kind: "tool" | "think";
+  text: string;
 }
 
 interface ChatSession {
@@ -54,9 +74,27 @@ export class ChatView extends ItemView {
   private cmdBtnEl!: HTMLButtonElement;
   private busy = false;
   private stopped = false;
+  /** Messages queued while busy; drained one-by-one after each turn completes. */
+  private pendingQueue: string[] = [];
+  /** DOM node for the "pending sends" card in the message area. */
+  private queueCardEl: HTMLElement | null = null;
+  /** Index of the queue row being edited (inline), or null. */
+  private editingQueueIndex: number | null = null;
+  private editingQueueText = "";
   private sessions: ChatSession[];
   private activeId: string;
+  /** True while at least one approval/question card is open — freezes message
+   *  polling so queued replies do not interleave with the card's answer. */
+  private answerCardActive(): boolean {
+    return this.pendingCards.size > 0;
+  }
   private dshSessionId: string | null = null;
+  /** Unsubscribe from the mux relay while this view is open. */
+  private relayUnsub: (() => void) | null = null;
+  /** Live decision cards (approval / question) keyed by the stable rpcId. */
+  private pendingCards = new Map<string, HTMLElement>();
+  /** Full-view overlay seat for approval/question cards (web composer takeover). */
+  private decisionLayerEl: HTMLElement | null = null;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -100,7 +138,13 @@ export class ChatView extends ItemView {
     } catch {
       this.sessions = [];
     }
-    if (this.sessions.length > 0) this.activeId = this.sessions[0].id;
+    if (this.sessions.length > 0) {
+      // Restore the session that was active when the plugin last closed; fall
+      // back to the first persisted session only if it no longer exists.
+      const last = await this.plugin.loadActiveChatId();
+      const found = last ? this.sessions.find((s) => s.id === last) : undefined;
+      this.activeId = found ? found.id : this.sessions[0].id;
+    }
 
     const root = this.containerEl.children[1] as HTMLElement;
     root.empty();
@@ -111,6 +155,9 @@ export class ChatView extends ItemView {
     this.renderHistoryPanel();
     this.renderMessages();
     this.renderComposer();
+    // Full-view overlay seat for approval/question cards (dsh-web composer
+    // takeover style). Hidden (display:none) until a decision arrives.
+    this.decisionLayerEl = this.rootEl.createDiv({ cls: "obdsh-decision-layer" });
     this.ensureSession();
 
     // Connect to dsh eagerly on open so model/reasoning/permission populate
@@ -129,6 +176,10 @@ export class ChatView extends ItemView {
 
   async onClose(): Promise<void> {
     this.plugin.bridge.abortAll();
+    if (this.relayUnsub) {
+      this.relayUnsub();
+      this.relayUnsub = null;
+    }
     this.uninstallHistoryAutoClose();
     await this.persist();
   }
@@ -182,7 +233,8 @@ export class ChatView extends ItemView {
       this.showHint(t("welcomeHint"));
       return;
     }
-    for (const m of s.messages) this.appendMessageReplay(m.role, m.text, m.reasoning);
+    for (const m of s.messages) this.appendMessageReplay(m.role, m.text, m.reasoning, m.process);
+    this.renderQueueCard();
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
   }
 
@@ -212,7 +264,8 @@ export class ChatView extends ItemView {
     this.inputEl.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
-        void this.onActionClick();
+        // While busy, Enter queues the message (web behavior) instead of stopping.
+        void this.send();
       }
     });
     this.sendBtn = inputWrap.createEl("button", {
@@ -699,6 +752,7 @@ export class ChatView extends ItemView {
 
     try {
       await this.plugin.http.connect();
+      this.ensureRelay();
       // dsh sessions are ephemeral on the host process: after a host/plugin
       // restart a persisted sessionId no longer exists. Reuse it only if it is
       // still valid on the current host; otherwise create a fresh one so the
@@ -740,6 +794,576 @@ export class ChatView extends ItemView {
     const idx = this.currentModel.indexOf(":");
     return idx >= 0 ? this.currentModel.slice(idx + 1) : this.currentModel;
   }
+
+  // ------------------------------------------------------------------
+  // Approval / question relay (mux stream)
+  // ------------------------------------------------------------------
+
+  /**
+   * Turn on the local mux relay once we know the dsh web URL, and (re)subscribe
+   * this view to its frames. Idempotent: the relay only needs starting once per
+   * host; the subscription is cleaned up when the view closes.
+   */
+  private ensureRelay(): void {
+    const url = this.plugin.http.url;
+    if (url) this.plugin.muxRelay.start(url);
+    if (!this.relayUnsub) {
+      this.relayUnsub = this.plugin.muxRelay.onFrame((frame) => this.onRelayFrame(frame));
+    }
+  }
+
+  /** Dispatch one relayed mux frame to the right handler (scoped to this session). */
+  private onRelayFrame(frame: RelayFrame): void {
+    if (frame.type === "stream/error") {
+      console.error("[obsidian-dsh] mux stream error:", frame.error);
+      return;
+    }
+    // Every non-stream frame carries a sessionId; ignore frames for other sessions.
+    if (frame.sessionId !== this.dshSessionId) return;
+    switch (frame.type) {
+      case "approval/requested":
+        void this.renderApprovalCard(frame);
+        break;
+      case "approval/resolved":
+        this.resolveCardByApproval(frame.approvalId, frame.outcome);
+        break;
+      case "question/requested":
+        void this.renderQuestionCard(frame);
+        break;
+      case "question/resolved":
+        this.resolveCardByRpc(frame.questionRpcId, frame.outcome);
+        break;
+      case "session/event":
+        this.handleSessionEvent(frame.event);
+        break;
+      default:
+        break;
+    }
+  }
+
+  /** Accumulated thinking text while a reasoning block is streaming. */
+  private reasoningBuf = "";
+  /** Execution detail accumulated for the CURRENT assistant reply, persisted
+   * onto that message when it lands so it survives plugin reloads. */
+  private pendingProcess: ProcessItem[] = [];
+  /** Tool-call ids already recorded this turn (mux may replay frames on
+   * reconnect) — used to avoid recording the same tool call twice. */
+  private seenToolCallIds = new Set<string>();
+
+  /** Render the live execution detail flowing through the mux stream (tool
+   * calls, thinking) as compact cards above the reply, like dsh web. */
+  private handleSessionEvent(ev: SessionEventSubscribe): void {
+    const type = ev.type;
+    if (type === "tool/call") {
+      const d = (ev.data ?? {}) as { name?: string; arguments?: string; callId?: string };
+      // mux may replay a frame on reconnect; skip a tool call we already recorded.
+      if (d.callId && this.seenToolCallIds.has(d.callId)) return;
+      if (d.callId) this.seenToolCallIds.add(d.callId);
+      const name = d.name || "tool";
+      // ask_user_question renders as a real question/approval card (question/
+      // requested frame), so don't print a truncated arguments dump here.
+      if (name === "ask_user_question") {
+        const chip = "❓ 提问";
+        this.pendingProcess.push({ kind: "tool", text: chip });
+        this.appendProcessChip(chip);
+        return;
+      }
+      const args = (() => {
+        try {
+          const parsed = JSON.parse(d.arguments || "{}");
+          const keys = Object.keys(parsed);
+          const brief = keys
+            .slice(0, 2)
+            .map((k) => {
+              const v = parsed[k];
+              const s = typeof v === "string" ? v : JSON.stringify(v);
+              return `${k}=${s.slice(0, 40)}`;
+            })
+            .join(" ");
+          return brief ? ` · ${brief}` : "";
+        } catch {
+          return "";
+        }
+      })();
+      const chip = `🧰 ${name}${args}`;
+      this.pendingProcess.push({ kind: "tool", text: `🧰 ${name}${args}` });
+      this.appendProcessChip(chip);
+      return;
+    }
+    if (type === "assistant/chunk") {
+      const d = (ev.data ?? {}) as { chunk?: { type?: string; block?: { type?: string; text?: string } } };
+      const c = d.chunk;
+      if (!c) return;
+      if (c.type === "block-start" && c.block?.type === "reasoning") {
+        this.reasoningBuf = "";
+      } else if (c.type === "block-end" && c.block?.type === "reasoning") {
+        const text = (c.block.text || this.reasoningBuf).trim();
+        if (text) {
+          this.pendingProcess.push({ kind: "think", text: `🤔 ${text.slice(0, 200)}` });
+          this.appendProcessChip(`🤔 ${text.slice(0, 200)}`);
+        }
+      }
+      return;
+    }
+  }
+
+  /** Append a compact process/thinking chip to the message area. */
+  private appendProcessChip(text: string): void {
+    this.messagesEl.createDiv({ cls: "obdsh-process-chip", text });
+    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+  }
+
+  /** Show/return the full-view decision layer (web composer takeover). */
+  private showDecisionLayer(): HTMLElement {
+    this.ensureDecisionStyles();
+    if (!this.decisionLayerEl) {
+      this.decisionLayerEl = this.rootEl.createDiv({ cls: "obdsh-decision-layer" });
+    }
+    this.decisionLayerEl.empty();
+    this.decisionLayerEl.addClass("is-visible");
+    return this.decisionLayerEl;
+  }
+
+  /**
+   * Inject an authoritative inline stylesheet for the decision cards so the
+   * "flat full-width options, wrap long text, no per-option capsule" look holds
+   * even if Obsidian cached an older styles.css. Idempotent via a stable id.
+   */
+  private ensureDecisionStyles(): void {
+    if (document.getElementById("obdsh-decision-style")) return;
+    const style = document.createElement("style");
+    style.id = "obdsh-decision-style";
+    style.textContent = `
+      .obdsh-decision-card { padding: 0; overflow: hidden; }
+      .obdsh-qoptions { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; width: 100%; }
+      .obdsh-qoption {
+        display: flex !important;
+        align-items: flex-start !important;
+        gap: 8px !important;
+        width: 100% !important;
+        min-height: 40px !important;
+        flex-shrink: 0 !important;
+        padding: 9px 12px !important;
+        border: none !important;
+        border-radius: 10px !important;
+        background: transparent !important;
+        color: var(--text-normal) !important;
+        font-size: 14px; font-weight: 500; text-align: left; line-height: 1.5;
+        cursor: pointer; box-shadow: none !important;
+      }
+      .obdsh-qoption:hover:not(:disabled) { background: var(--background-modifier-hover) !important; }
+      .obdsh-qoption.obdsh-selected { background: color-mix(in srgb, var(--obdsh-brand) 14%, transparent) !important; }
+      .obdsh-qoption.obdsh-selected .obdsh-qopt-label { color: var(--obdsh-brand) !important; }
+      .obdsh-qopt-num {
+        flex: 0 0 auto; min-width: 20px; height: 20px; display: grid; place-items: center;
+        border-radius: 6px; background: var(--background-modifier-border); color: var(--text-secondary);
+        font-size: 12px; font-weight: 600; margin-top: 3px;
+      }
+      .obdsh-qopt-copy { flex: 1 1 auto; min-width: 0; display: block; white-space: normal !important; overflow-wrap: anywhere !important; word-break: break-word; }
+      .obdsh-qopt-label { line-height: 1.5; white-space: normal !important; overflow-wrap: anywhere !important; }
+      .obdsh-qopt-check { color: var(--obdsh-brand); font-size: 14px; font-weight: 700; flex: 0 0 auto; margin-top: 3px; }
+      .obdsh-qbody { display: flex; flex-direction: column; padding: 4px 12px 6px; max-height: 42vh; overflow-y: auto !important; overflow-x: hidden !important; }
+    `;
+    document.head.appendChild(style);
+  }
+
+  /** Hide the decision layer and clear its contents. */
+  private hideDecisionLayer(): void {
+    if (!this.decisionLayerEl) return;
+    this.decisionLayerEl.empty();
+    this.decisionLayerEl.removeClass("is-visible");
+  }
+
+  /** Render an approval decision card with Approve / Reject buttons. */
+  private async renderApprovalCard(frame: RelayFrame & { type: "approval/requested" }): Promise<void> {
+    if (this.pendingCards.has(frame.rpcId)) return;
+    const layer = this.showDecisionLayer();
+    const card = layer.createDiv({ cls: "obdsh-decision-card obdsh-approval-card" });
+    this.pendingCards.set(frame.rpcId, card);
+    card.dataset.approvalId = frame.approvalId;
+    const tool = toolDisplayName(frame.toolName);
+    card.createDiv({ cls: "obdsh-decision-kind", text: `${t("approvalTitle")}` });
+    card.createDiv({
+      cls: "obdsh-decision-prompt",
+      text: frame.reason || `${t("approvalTool")} ${tool} — ${t("approvalAsk")}`,
+    });
+    const actions = card.createDiv({ cls: "obdsh-decision-actions" });
+    const reject = actions.createEl("button", { cls: "obdsh-btn obdsh-btn-ghost", text: t("approvalReject") });
+    reject.addEventListener("click", () => void this.answerApproval(frame, "rejected", card));
+    const allow = actions.createEl("button", { cls: "obdsh-btn obdsh-btn-opt", text: t("approvalAllow") });
+    allow.addEventListener("click", () => void this.answerApproval(frame, "allowed-once", card));
+  }
+
+  /** Submit an approval verdict then mark the card answered (idempotent). */
+  private async answerApproval(
+    frame: RelayFrame & { type: "approval/requested" },
+    outcome: "allowed-once" | "rejected",
+    bubble: HTMLElement
+  ): Promise<void> {
+    const card = this.pendingCards.get(frame.rpcId);
+    if (!card) return;
+    bubble.addClass("obdsh-decision-pending");
+    try {
+      const res = await this.plugin.http.respond(frame.rpcId, {
+        sessionId: frame.sessionId,
+        approvalId: frame.approvalId,
+        outcome,
+      });
+      if (!res.accepted) {
+        new Notice(`dsh 未接受审批应答: ${res.reason || "not-pending"}`);
+        bubble.removeClass("obdsh-decision-pending");
+        return;
+      }
+      this.retireCard(frame.rpcId);
+      void this.pauseForAgentReply(frame.sessionId);
+    } catch (e) {
+      new Notice(`审批应答失败: ${(e as Error).message.slice(0, 80)}`);
+      bubble.removeClass("obdsh-decision-pending");
+    }
+  }
+
+  /** Render the full question flow (one question at a time, dsh-web style). */
+  private async renderQuestionCard(frame: RelayFrame & { type: "question/requested" }): Promise<void> {
+    if (this.pendingCards.has(frame.rpcId)) return;
+    const layer = this.showDecisionLayer();
+    const bubble = layer.createDiv({ cls: "obdsh-decision-card" });
+    this.pendingCards.set(frame.rpcId, bubble);
+
+    const questions = frame.questions;
+    const drafts: { selected: string[]; custom: string; skipped: boolean }[] =
+      questions.map(() => ({ selected: [], custom: "", skipped: false }));
+    let index = 0;
+
+    // --- header: question title (left) + close (right) ---
+    const header = bubble.createDiv({ cls: "obdsh-qheader" });
+    const headBlock = header.createDiv({ cls: "obdsh-qhead-block" });
+    const titleEl = headBlock.createEl("div", { cls: "obdsh-qtitle" });
+    const closeBtn = header.createEl("button", {
+      cls: "obdsh-icon-btn obdsh-qclose", attr: { title: t("questionCancel"), "aria-label": t("questionCancel") },
+    });
+    closeBtn.setText("✕");
+    closeBtn.addEventListener("click", () => void this.cancelQuestion(frame, bubble));
+
+    // --- body: options + per-question custom input (re-rendered per question) ---
+    const body = bubble.createDiv({ cls: "obdsh-qbody" });
+
+    // --- footer: pager + skip/submit ---
+    const footer = bubble.createDiv({ cls: "obdsh-qfooter" });
+    const pager = footer.createDiv({ cls: "obdsh-pager" });
+    const prevBtn = pager.createEl("button", { cls: "obdsh-icon-btn obdsh-pager-btn", text: "‹" });
+    const progressEl = pager.createSpan({ cls: "obdsh-progress" });
+    const nextBtn = pager.createEl("button", { cls: "obdsh-icon-btn obdsh-pager-btn", text: "›" });
+    const feedbackEl = footer.createDiv({ cls: "obdsh-qfeedback" });
+    const actions = footer.createDiv({ cls: "obdsh-decision-actions obdsh-qactions" });
+    const skipBtn = actions.createEl("button", { cls: "obdsh-btn obdsh-btn-ghost obdsh-qskip", text: t("questionSkip") });
+    const primaryBtn = actions.createEl("button", { cls: "obdsh-btn obdsh-btn-primary obdsh-qprimary", text: t("questionNext") });
+
+    const answered = (d: { selected: string[]; custom: string; skipped: boolean }): boolean =>
+      d.selected.length > 0 || d.custom.trim() !== "";
+    const completed = (d: { selected: string[]; custom: string; skipped: boolean }): boolean =>
+      answered(d) || d.skipped;
+
+    const optionSelectedBtn = (group: HTMLElement, exclude?: HTMLElement): void => {
+      Array.from(group.querySelectorAll(".obdsh-qoption.obdsh-selected"))
+        .filter((b) => b !== exclude)
+        .forEach((b) => {
+          b.removeClass("obdsh-selected");
+          b.querySelector(".obdsh-qopt-check")?.remove();
+        });
+    };
+
+    const render = async (): Promise<void> => {
+      const q = questions[index];
+      const draft = drafts[index];
+      titleEl.setText(q.header ? `${q.header} — ${q.question || q.header}` : (q.question || q.header || ""));
+      body.empty();
+
+      const qgroup = body.createDiv({ cls: "obdsh-qgroup" });
+      if (q.detail) await this.renderMarkdown(qgroup.createDiv({ cls: "obdsh-question-detail" }), q.detail);
+      const opts = qgroup.createDiv({ cls: "obdsh-qoptions" });
+
+      if (q.options && q.options.length > 0) {
+        for (let optIndex = 0; optIndex < q.options.length; optIndex += 1) {
+          const opt = q.options[optIndex];
+          if (!opt.label.trim()) continue;
+          const label = opt.label.trim();
+          const isSel = q.multiSelect === true
+            ? draft.selected.includes(label)
+            : draft.selected[0] === label;
+          const row = opts.createDiv({
+            cls: "obdsh-qoption" + (isSel ? " obdsh-selected" : ""),
+            attr: {
+              role: "button",
+              tabindex: "0",
+              ...(opt.description ? { title: opt.description } : {}),
+            },
+          });
+          if (q.multiSelect !== true) {
+            // Single-select: leading number badge, like dsh web.
+            row.createSpan({ cls: "obdsh-qopt-num", text: String(optIndex + 1) });
+          }
+          row.createDiv({ cls: "obdsh-qopt-copy" }).createSpan({ cls: "obdsh-qopt-label", text: label });
+          if (isSel) row.createSpan({ cls: "obdsh-qopt-check", text: "✓" });
+          row.addEventListener("click", () => {
+            if (q.multiSelect === true) {
+              // Multi-select: toggle just this row + the draft; do NOT rebuild.
+              const nowSel = draft.selected.includes(label);
+              draft.selected = nowSel
+                ? draft.selected.filter((s) => s !== label)
+                : [...draft.selected, label];
+              draft.skipped = false;
+              this.setMultiRowChecked(row, !nowSel);
+              return;
+            }
+            // Single-select: pick this one, clear siblings, advance.
+            draft.selected = [label];
+            draft.custom = "";
+            draft.skipped = false;
+            optionSelectedBtn(opts, row);
+            row.addClass("obdsh-selected");
+            if (!row.querySelector(".obdsh-qopt-check")) {
+              row.createSpan({ cls: "obdsh-qopt-check", text: "✓" });
+            }
+            if (index < questions.length - 1) { index += 1; void render(); }
+          });
+          row.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              (e.currentTarget as HTMLElement).click();
+            }
+          });
+        }
+      }
+
+      // Custom answer row (inline input).
+      const customRow = qgroup.createDiv({ cls: "obdsh-qcustom" });
+      const customInput = customRow.createEl("input", {
+        type: "text",
+        cls: "obdsh-qcustom-input",
+        attr: { placeholder: t("questionCustomPlaceholder") },
+      });
+      customInput.value = draft.custom;
+      customInput.addEventListener("input", () => {
+        draft.custom = customInput.value;
+        draft.skipped = false;
+        if (q.multiSelect !== true) { draft.selected = []; optionSelectedBtn(opts); }
+      });
+      customInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); advance(); }
+      });
+
+      updateFooter();
+      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+    };
+
+    const advance = (): void => {
+      if (!completed(drafts[index])) {
+        feedbackEl.setText(t("questionAnswerOrSkip"));
+        return;
+      }
+      feedbackEl.empty();
+      if (index < questions.length - 1) { index += 1; void render(); }
+      else finish();
+    };
+
+    const finish = (): void => {
+      void this.submitAnswers(frame, drafts, bubble);
+    };
+
+    const updateFooter = (): void => {
+      progressEl.setText(`${index + 1} / ${questions.length}`);
+      prevBtn.setAttr("disabled", index === 0 ? "true" : "");
+      nextBtn.setAttr("disabled", index === questions.length - 1 ? "true" : "");
+      const last = index === questions.length - 1;
+      primaryBtn.setText(last ? t("questionSubmit") : t("questionNext"));
+      primaryBtn.removeClass("obdsh-selected");
+    };
+
+    prevBtn.addEventListener("click", () => { if (index > 0) { index -= 1; void render(); } });
+    nextBtn.addEventListener("click", () => { if (index < questions.length - 1) { index += 1; void render(); } });
+    skipBtn.addEventListener("click", () => {
+      drafts[index] = { selected: [], custom: "", skipped: true };
+      feedbackEl.empty();
+      if (index < questions.length - 1) { index += 1; void render(); }
+      else finish();
+    });
+    primaryBtn.addEventListener("click", advance);
+
+    await render();
+  }
+
+  /** Toggle a multi-select option row's checked visual (highlight + trailing ✓). */
+  private setMultiRowChecked(row: HTMLElement, checked: boolean): void {
+    if (checked) {
+      row.addClass("obdsh-selected");
+      if (!row.querySelector(".obdsh-qopt-check")) {
+        row.createSpan({ cls: "obdsh-qopt-check", text: "✓" });
+      }
+    } else {
+      row.removeClass("obdsh-selected");
+      row.querySelector(".obdsh-qopt-check")?.remove();
+    }
+  }
+
+  /**
+   * Submit the whole answer batch for one ask(). dsh's question endpoint expects
+   * ONE client-response per rpcId whose `answers` covers every question in the
+   * original order (id must match positionally; selected labels must be legal
+   * options). Packing mirrors dsh-web's QuestionComposer: a skipped question
+   * yields `selected: []`; a single-select question with a custom answer yields
+   * only `custom`; a multi-select keeps both `selected` and `custom`.
+   */
+  private async submitAnswers(
+    frame: RelayFrame & { type: "question/requested" },
+    drafts: { selected: string[]; custom: string; skipped: boolean }[],
+    bubble: HTMLElement
+  ): Promise<void> {
+    const card = this.pendingCards.get(frame.rpcId);
+    if (!card) return;
+
+    const answers = frame.questions.map((q, i) => {
+      const v = drafts[i];
+      if (v.skipped) return { id: q.id, selected: [] };
+      const custom = v.custom.trim();
+      return {
+        id: q.id,
+        selected: custom === "" || q.multiSelect === true ? v.selected : [],
+        ...(custom === "" ? {} : { custom }),
+      };
+    });
+
+    bubble.addClass("obdsh-decision-pending");
+    try {
+      const res = await this.plugin.http.respond(frame.rpcId, {
+        sessionId: frame.sessionId,
+        answer: { answers },
+      });
+      if (!res.accepted) {
+        new Notice(`dsh 未接受答题: ${res.reason || "not-pending"}`);
+        bubble.removeClass("obdsh-decision-pending");
+        return;
+      }
+      // Answer accepted — retire the card, then wait for and render the agent's
+      // follow-up reply (the agent continues after receiving the answers).
+      this.retireCard(frame.rpcId);
+      void this.pauseForAgentReply(frame.sessionId);
+    } catch (e) {
+      new Notice(`答题失败: ${(e as Error).message.slice(0, 80)}`);
+      bubble.removeClass("obdsh-decision-pending");
+    }
+  }
+
+  /**
+   * Close a question request without answering (web composer ×). The host
+   * resolves the pending ask as cancelled so the agent's tool call fails closed.
+   */
+  private async cancelQuestion(
+    frame: RelayFrame & { type: "question/requested" },
+    bubble: HTMLElement
+  ): Promise<void> {
+    const card = this.pendingCards.get(frame.rpcId);
+    if (!card) return;
+    bubble.addClass("obdsh-decision-pending");
+    try {
+      const res = await this.plugin.http.respond(
+        frame.rpcId,
+        {},
+        { code: "cancelled", message: "the user closed this question request", details: {} }
+      );
+      if (!res.accepted) {
+        new Notice(`dsh 未接受取消: ${res.reason || "not-pending"}`);
+        bubble.removeClass("obdsh-decision-pending");
+        return;
+      }
+      this.retireCard(frame.rpcId);
+      // The agent's ask resolved as cancelled; it should wrap up its turn (it
+      // may add a closing reply). Poll quietly so any closing output still
+      // renders, without forcing an empty "no follow-up" bubble if none comes.
+      void this.pauseForAgentReply(frame.sessionId, true);
+    } catch (e) {
+      new Notice(`取消失败: ${(e as Error).message.slice(0, 80)}`);
+      bubble.removeClass("obdsh-decision-pending");
+    }
+  }
+
+  /** Mark a card resolved by matching approval id. */
+  private resolveCardByApproval(approvalId: string, outcome: string): void {
+    for (const [rpcId, card] of this.pendingCards) {
+      if (card.dataset.approvalId === approvalId) {
+        this.resolveCard(rpcId, card, outcome);
+        return;
+      }
+    }
+  }
+
+  /** Mark a card resolved by matching question rpcId. */
+  private resolveCardByRpc(rpcId: string, outcome: string): void {
+    const card = this.pendingCards.get(rpcId);
+    if (card) this.resolveCard(rpcId, card, outcome);
+  }
+
+  /** Mark a card resolved (✓), then remove its DOM after a short pause. */
+  private resolveCard(rpcId: string, card: HTMLElement, outcome: string): void {
+    card.addClass("obdsh-decision-resolved");
+    const bubble = card.querySelector(".obdsh-decision-card") as HTMLElement | null;
+    if (bubble) bubble.addClass("obdsh-decision-pending");
+    card.dataset.outcome = outcome;
+    window.setTimeout(() => this.retireCard(rpcId), 400);
+  }
+
+  /** Remove a decision card from the DOM and the live map (idempotent). */
+  private retireCard(rpcId: string): void {
+    const card = this.pendingCards.get(rpcId);
+    if (!card) return;
+    this.pendingCards.delete(rpcId);
+    card.remove();
+    if (this.pendingCards.size === 0) this.hideDecisionLayer();
+  }
+
+  /**
+   * After an approval/question is answered, the agent continues its turn: it
+   * receives the user's answer and produces follow-up output. This opens a
+   * fresh typing bubble and polls the session log (same loop as a normal send)
+   * so the follow-up reply renders into the panel. Returns the final text.
+   */
+  private async pauseForAgentReply(sessionId: string, quiet = false): Promise<void> {
+    await this.plugin.hostManager.ensureStarted();
+    const prevBusy = this.busy;
+    this.busy = true;
+    this.stopped = false;
+    this.setActionButtonBusy(true);
+    const { row, body } = this.appendTyping();
+    try {
+      const before = await this.getLatestSeq(sessionId);
+      const final = await this.pollAssistantText(sessionId, before, 180000, row, body);
+      if (final.text.trim()) {
+        this.updateActiveSession("assistant", final.text, final.reasoning || undefined);
+      } else if (!final.reasoning.trim() && !quiet) {
+        this.updateActiveSession("assistant", `**${t("errorPrefix")}:** no follow-up from dsh.`);
+      } else if (quiet && !final.text.trim()) {
+        // Quiet cancel with no closing output: remove only a bare typing bubble.
+        if (body.hasClass("obdsh-typing")) row.remove();
+      }
+      const st = await this.fetchSessionStats(sessionId);
+      if (st) this.updateSessionStats(st);
+      this.rebuildHistoryList();
+      void this.persist();
+    } catch (e) {
+      console.error("[obsidian-dsh] pauseForAgentReply failed:", e);
+    } finally {
+      this.busy = prevBusy;
+      this.setActionButtonBusy(prevBusy);
+      this.inputEl?.focus();
+      // After the answer's follow-up is rendered, resume draining any queued
+      // messages so they continue in order (not interleaved with the card).
+      if (this.pendingQueue.length > 0 && !this.answerCardActive()) {
+        const next = this.pendingQueue.shift()!;
+        this.renderQueueCard();
+        void this.sendNow(next);
+      }
+    }
+  }
+
 
   /** Apply a models catalog to the composer controls (model button, reasoning). */
   private applyModels(cat: ModelsCatalog): void {
@@ -885,9 +1509,15 @@ export class ChatView extends ItemView {
     return this.sessions.find((s) => s.id === this.activeId)!;
   }
 
+  /** Persist the currently active chat session id so it restores on reopen. */
+  private persistActiveChatId(): void {
+    void this.plugin.saveActiveChatId(this.activeId).catch(() => {});
+  }
+
   private newSession(): void {
     this.plugin.bridge.abortAll();
     this.activeId = this.newId();
+    this.persistActiveChatId();
     this.ensureSession();
     this.renderMessages();
     this.showHint(t("newConversationStarted"));
@@ -895,11 +1525,17 @@ export class ChatView extends ItemView {
     this.permSelect?.setOptions([], null);
     this.reasoningSelect?.setOptions([], null);
     this.setStatusNoData();
+    // Bind a fresh dsh session eagerly so permission & reasoning are
+    // selectable BEFORE the first message is sent.
+    void this.ensureHttpSession().then((sid) => {
+      if (sid) void this.populateComposerControls();
+    });
   }
 
   private selectSession(id: string): void {
     this.plugin.bridge.abortAll();
     this.activeId = id;
+    this.persistActiveChatId();
     this.ensureSession();
     this.renderMessages();
     // Point composer controls + status bar at the newly selected session.
@@ -934,11 +1570,14 @@ export class ChatView extends ItemView {
     this.uninstallHistoryAutoClose();
     this.historyAutoClose = (e) => {
       // Close the history panel when clicking outside it (and outside its
-      // toggle button / any open dropdown).
+      // toggle button / any open dropdown / any open context menu).
       const t = e.target as Node | null;
       if (!t) return;
       if (this.historyPanelEl.contains(t)) return;
       if ((t as Element).closest?.(".obdsh-history-toggle")) return;
+      // Clicking inside an open context menu (e.g. archive/fork in the
+      // history right-click menu) must not collapse the history panel.
+      if ((t as Element).closest?.(".menu")) return;
       this.closeHistory();
     };
     // Use a capturing mousedown so it wins over other handlers; small timeout
@@ -1080,6 +1719,7 @@ export class ChatView extends ItemView {
       this.activeId = this.sessions[0]?.id || this.newId();
       this.ensureSession();
       this.renderMessages();
+      this.persistActiveChatId();
     }
     this.rebuildHistoryList();
     void this.persist();
@@ -1099,8 +1739,21 @@ export class ChatView extends ItemView {
     reasoning?: string
   ): void {
     const s = this.active();
+    // De-duplicate: if the last stored message is an assistant reply with the
+    // exact same text, skip — streamFromDsh and pauseForAgentReply can both be
+    // called for one turn and would otherwise pile up copies.
+    const last = s.messages[s.messages.length - 1];
+    if (role === "assistant" && last && last.role === "assistant" && last.text === text) {
+      return;
+    }
     const msg: ChatMessage = { role, text };
     if (reasoning) msg.reasoning = reasoning;
+    // Attach any accumulated execution detail (tool calls / thinking) to this
+    // reply so it survives reloads and can be replayed from the stored session.
+    if (role === "assistant" && this.pendingProcess.length > 0) {
+      msg.process = [...this.pendingProcess];
+      this.pendingProcess = [];
+    }
     s.messages.push(msg);
     if (s.messages.length === 1) {
       s.title = s.messages[0].text.replace(/\s+/g, " ").slice(0, 40) || t("newChat");
@@ -1110,7 +1763,10 @@ export class ChatView extends ItemView {
   // ------------------------------------------------------------------
   // Messaging
   // ------------------------------------------------------------------
-  /** Single send/stop entry point: click or Enter toggles the action. */
+  /** Single send/stop entry point: the round button toggles. Click alone calls
+   * send (queues while busy); while busy the button shows Stop, so a click
+   * stops. Pressing Enter (see renderComposer) always calls send(), which
+   * queues a message while busy instead of stopping. */
   private async onActionClick(): Promise<void> {
     if (this.busy) this.onStop();
     else await this.send();
@@ -1131,17 +1787,31 @@ export class ChatView extends ItemView {
     }
   }
 
+  /** Entry point: read the input, then either send now or queue it while busy. */
   private async send(): Promise<void> {
-    if (this.busy) return;
     const text = this.inputEl.value.trim();
     if (!text) return;
-
     this.inputEl.value = "";
+    if (this.busy) {
+      // Busy: queue the message for later (never drop it silently).
+      this.pendingQueue.push(text);
+      new Notice(t("msgQueued"));
+      this.renderQueueCard();
+      return;
+    }
+    await this.sendNow(text);
+  }
+
+  /** Send exactly one message through the full user-message / stream pipeline. */
+  private async sendNow(text: string): Promise<void> {
     this.updateActiveSession("user", text);
     this.appendMessage("user", text);
     this.busy = true;
     this.stopped = false;
     this.setActionButtonBusy(true);
+    // Start a fresh turn: reset accumulated execution detail and tool-call ids.
+    this.pendingProcess = [];
+    this.seenToolCallIds.clear();
 
     const { row, body } = this.appendTyping();
 
@@ -1163,11 +1833,147 @@ export class ChatView extends ItemView {
       await this.renderMarkdown(body, msg);
     } finally {
       this.busy = false;
+      this.stopped = false;
       this.setActionButtonBusy(false);
       this.inputEl.focus();
       this.rebuildHistoryList();
       void this.persist();
+      this.renderQueueCard();
+      // Drain any queued sends automatically once idle — but not while a
+      // question/approval card is open (pauseForAgentReply's finally drains
+      // then, so replies don't interleave with the card).
+      if (this.pendingQueue.length > 0 && !this.answerCardActive()) {
+        const next = this.pendingQueue.shift()!;
+        this.renderQueueCard();
+        void this.sendNow(next);
+      }
     }
+  }
+
+  /** Render (or remove) the "pending sends" card at the top of the message list. */
+  private renderQueueCard(): void {
+    if (this.queueCardEl) {
+      this.queueCardEl.remove();
+      this.queueCardEl = null;
+    }
+    if (this.pendingQueue.length === 0) {
+      this.editingQueueIndex = null;
+      this.editingQueueText = "";
+      return;
+    }
+
+    const card = this.messagesEl.createDiv({ cls: "obdsh-queue-card" });
+    this.queueCardEl = card;
+    const head = card.createDiv({ cls: "obdsh-queue-head" });
+    head.createSpan({ cls: "obdsh-queue-title", text: `${t("queueTitle")} (${this.pendingQueue.length})` });
+    const clear = head.createEl("button", {
+      cls: "obdsh-icon-btn obdsh-queue-clear",
+      attr: { title: t("queueClear"), "aria-label": t("queueClear") },
+    });
+    clear.innerHTML = ICON_TRASH;
+    clear.addEventListener("click", () => {
+      this.pendingQueue = [];
+      this.editingQueueIndex = null;
+      this.renderQueueCard();
+    });
+
+    for (let i = 0; i < this.pendingQueue.length; i += 1) {
+      const itemText = this.pendingQueue[i];
+      const item = card.createDiv({ cls: "obdsh-queue-item" });
+      if (this.editingQueueIndex === i) {
+        const input = item.createEl("input", {
+          type: "text",
+          cls: "obdsh-queue-editor",
+          attr: { value: this.editingQueueText, "aria-label": t("queueEdit") },
+        });
+        const save = item.createEl("button", {
+          cls: "obdsh-icon-btn obdsh-queue-action",
+          attr: { title: t("queueSave"), "aria-label": t("queueSave") },
+        });
+        save.innerHTML = ICON_CHECK;
+        save.addEventListener("click", () => this.saveQueuedEdit(i));
+        const cancel = item.createEl("button", {
+          cls: "obdsh-icon-btn obdsh-queue-action",
+          attr: { title: t("queueCancelEdit"), "aria-label": t("queueCancelEdit") },
+        });
+        cancel.innerHTML = ICON_CLOSE;
+        cancel.addEventListener("click", () => this.cancelQueuedEdit());
+        input.addEventListener("input", () => { this.editingQueueText = input.value; });
+        input.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); this.saveQueuedEdit(i); }
+          else if (e.key === "Escape") this.cancelQueuedEdit();
+        });
+        window.setTimeout(() => input.focus(), 0);
+      } else {
+        const idx = item.createSpan({ cls: "obdsh-queue-idx", text: `#${i + 1}` });
+        void idx;
+        const txt = item.createSpan({ cls: "obdsh-queue-text", text: itemText });
+        txt.setAttr("title", itemText);
+        const actions = item.createDiv({ cls: "obdsh-queue-actions" });
+        const edit = actions.createEl("button", {
+          cls: "obdsh-icon-btn obdsh-queue-action",
+          attr: { title: t("queueEdit"), "aria-label": t("queueEdit") },
+        });
+        edit.innerHTML = ICON_EDIT;
+        edit.addEventListener("click", () => this.startEditing(i));
+        const del = actions.createEl("button", {
+          cls: "obdsh-icon-btn obdsh-queue-action",
+          attr: { title: t("queueRemove"), "aria-label": t("queueRemove") },
+        });
+        del.innerHTML = ICON_TRASH;
+        del.addEventListener("click", () => this.removeQueued(i));
+        const go = actions.createEl("button", {
+          cls: "obdsh-icon-btn obdsh-queue-action obdsh-queue-go",
+          attr: { title: t("queueSendNow"), "aria-label": t("queueSendNow") },
+        });
+        go.innerHTML = ICON_SEND;
+        go.addEventListener("click", () => this.sendQueuedNow(i));
+      }
+    }
+    card.createDiv({ cls: "obdsh-queue-hint", text: t("queueHint") });
+    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+  }
+
+  /** Enter inline edit mode for a queued row. */
+  private startEditing(index: number): void {
+    if (index < 0 || index >= this.pendingQueue.length) return;
+    this.editingQueueIndex = index;
+    this.editingQueueText = this.pendingQueue[index];
+    this.renderQueueCard();
+  }
+
+  /** Save the edited text back into the queue (fires the row inline edit). */
+  private saveQueuedEdit(index: number): void {
+    const text = this.editingQueueText.trim();
+    if (index < 0 || index >= this.pendingQueue.length) return;
+    if (!text) return;
+    this.pendingQueue[index] = text;
+    this.editingQueueIndex = null;
+    this.renderQueueCard();
+  }
+
+  private cancelQueuedEdit(): void {
+    this.editingQueueIndex = null;
+    this.editingQueueText = "";
+    this.renderQueueCard();
+  }
+
+  /** Interrupt the running turn and send this queued message next (top priority). */
+  private sendQueuedNow(index: number): void {
+    if (index < 0 || index >= this.pendingQueue.length) return;
+    const [text] = this.pendingQueue.splice(index, 1);
+    this.pendingQueue.unshift(text);
+    this.editingQueueIndex = null;
+    this.renderQueueCard();
+    if (this.busy) this.onStop();
+  }
+
+  /** Remove a single queued message by its current index. */
+  private removeQueued(index: number): void {
+    if (index < 0 || index >= this.pendingQueue.length) return;
+    this.pendingQueue.splice(index, 1);
+    if (this.editingQueueIndex === index) this.editingQueueIndex = null;
+    this.renderQueueCard();
   }
 
   private async streamFromDsh(sessionId: string, text: string, row: HTMLElement, body: HTMLElement): Promise<void> {
@@ -1187,6 +1993,12 @@ export class ChatView extends ItemView {
       // `body`; record only the clean final text as conversational history.
       if (final.text.trim()) {
         this.updateActiveSession("assistant", final.text, final.reasoning || undefined);
+      } else if (this.answerCardActive()) {
+        // Polling stopped because a question/approval card opened; the agent is
+        // waiting for the user's answer. Only remove the row if it is still a
+        // bare typing bubble — if a reply was already rendered into it, keep it.
+        const stillTyping = body.hasClass("obdsh-typing");
+        if (stillTyping) row.remove();
       } else if (!final.reasoning.trim()) {
         const msg = `**${t("errorPrefix")}:** no reply from dsh within timeout.`;
         this.updateActiveSession("assistant", msg);
@@ -1239,9 +2051,20 @@ export class ChatView extends ItemView {
     let latest: { text: string; reasoning: string } = { text: "", reasoning: "" };
     let latestSeq = baseline; // ignore everything before this turn's baseline
     let stableTicks = 0;
+    let streamedText = "";    // progressive assistant text rendered from chunks
+    let streamedDirty = false;
+    let lastRenderSeq = 0;
+    let renderedAny = false;  // whether we've placed an assistant bubble yet
 
     while (Date.now() < deadline) {
       if (this.stopped) break;
+      // A question/approval card is open: stop polling the session log now.
+      // The agent is waiting for the user's answer, so any reply fetched here
+      // would interleave with the card and misorder the conversation. Return
+      // empty and let the answer flow (pauseForAgentReply) take over.
+      if (this.answerCardActive()) {
+        return { text: "", reasoning: "" };
+      }
       let events: Array<{ event?: { seq?: number; type?: string; data?: { message?: unknown } } }> = [];
       try {
         const hist = (await this.plugin.http.history(sessionId, 100)) as unknown as {
@@ -1254,22 +2077,81 @@ export class ChatView extends ItemView {
 
       // Track the newest assistant/message of THIS turn (seq > baseline).
       let anyNew = false;
+      let anyMessage = false;   // any assistant/message in THIS turn
+      let endedTurn = false;    // a turn/end in THIS turn (no newer turn/start)
+      let errorText = "";       // error surfaced by an error event in THIS turn
       for (const e of events) {
-        if (e.event?.type !== "assistant/message") continue;
-        const seq = e.event.seq ?? 0;
-        if (seq <= baseline) continue; // skip previous turns' replies entirely
-        const content = (e.event.data?.message as { content?: unknown[] } | undefined)?.content;
+        const seq = e.event?.seq ?? 0;
+        const type = e.event?.type;
+        if (seq <= baseline) continue; // skip previous turns' events entirely
+
+        if (type === "turn/end" || type === "turn/start") {
+          if (type === "turn/end") endedTurn = true;
+          continue;
+        }
+        if (type === "host/agent-error" || type === "stream/error") {
+          const msg =
+            ((e.event?.data as { message?: string; error?: { message?: string } } | undefined)?.message) ||
+            ((e.event?.data as { error?: { message?: string } } | undefined)?.error?.message) ||
+            "";
+          if (msg) errorText = msg;
+          continue;
+        }
+        // Streaming: render text as it arrives via assistant/chunk (block-end).
+        // dsh emits one block-end per text block; accumulate and re-render the
+        // bubble each poll so the reply "types out" progressively instead of
+        // appearing all at once at the final assistant/message.
+        if (type === "assistant/chunk") {
+          const chunkData = e.event?.data as
+            | { chunk?: { type?: string; block?: { type?: string; text?: string } } }
+            | undefined;
+          const c = chunkData?.chunk;
+          if (c?.type === "block-end" && c.block?.type === "text" && c.block.text) {
+            streamedText += c.block.text;
+            streamedDirty = true;
+          }
+          continue;
+        }
+        if (type !== "assistant/message") continue;
+        anyMessage = true;
+        const content = (e.event?.data?.message as { content?: unknown[] } | undefined)?.content;
         const parsed = this.splitMessage(content);
         if (seq > latestSeq) {
           latestSeq = seq;
-          latest = parsed;
           anyNew = true;
+          // Accumulate every assistant/message of this turn (multi-step reply)
+          // so intermediate paragraphs aren't lost to only the last one.
+          if (parsed.text.trim()) {
+            latest = {
+              text: latest.text ? `${latest.text.trimEnd()}\n\n${parsed.text.trim()}` : parsed.text,
+              reasoning: parsed.reasoning || latest.reasoning,
+            };
+          } else {
+            latest = { text: latest.text, reasoning: parsed.reasoning || latest.reasoning };
+          }
         }
         if (!seen.has(seq) && (parsed.text.trim() || parsed.reasoning.trim())) {
           seen.add(seq);
-          await this.renderReplyWithReasoning(row, body, parsed);
+          if (!renderedAny) {
+            // First assistant bubble of this turn: reuse the `appendTyping` body.
+            renderedAny = true;
+            await this.renderReplyWithReasoning(row, body, parsed);
+          } else {
+            // A LATER assistant/message of the same turn (multi-step reply):
+            // place it in its own NEW bubble so earlier steps are not overwritten.
+            this.appendMessageReplay("assistant", parsed.text, parsed.reasoning);
+          }
           this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
         }
+      }
+
+      // Fail fast: an explicit dsh error ends the wait with that text.
+      if (errorText) {
+        return { text: `**${t("errorPrefix")}:** ${errorText}`, reasoning: "" };
+      }
+      // Fail fast: the turn ended without producing any assistant/message.
+      if (!anyMessage && endedTurn) {
+        return { text: "", reasoning: "" };
       }
 
       // Only settle once we have at least one NEW assistant/reply for this turn
@@ -1278,14 +2160,26 @@ export class ChatView extends ItemView {
         if (anyNew) {
           stableTicks = 0;
         } else if (++stableTicks >= 3) {
-          return latest;
+          return this.combineReply(streamedText, latest);
         }
       } else {
         stableTicks = 0;
       }
       await new Promise((r) => setTimeout(r, 1000));
     }
-    return latest.text.trim() ? latest : { text: "", reasoning: "" };
+    return this.combineReply(streamedText, latest);
+  }
+
+  /** Fold the streamed multi-step text with the latest parsed reply into the
+   * result returned to the caller, so nothing is lost on persist/replay. */
+  private combineReply(
+    streamed: string,
+    latest: { text: string; reasoning: string }
+  ): { text: string; reasoning: string } {
+    // The authoritative reply is the latest assistant/message's text. streamed
+    // was only used for progressive UI display; folding it back in duplicates
+    // the same paragraph (chunks already contain the full text), so DON'T.
+    return { text: latest.text, reasoning: latest.reasoning || "" };
   }
 
   /** Split an assistant message content array into reasoning vs final text. */
@@ -1326,6 +2220,9 @@ export class ChatView extends ItemView {
       // Render as Markdown so live replies match the formatted replay.
       await this.renderMarkdown(body, r.text);
     }
+    // Give the assistant reply a copy button fixed to the message row's
+    // top-right corner (outside the bubble, not overlapping text).
+    this.attachCopyOnce(body, r.text);
   }
 
   /** Get aggregated per-session stats (turns/steps/times/tokens) from history. */
@@ -1424,12 +2321,25 @@ export class ChatView extends ItemView {
     if (role === "user") bubble.setText(text);
     else void this.renderMarkdown(bubble, text);
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
-    this.attachCopyButton(row, text);
+    this.attachCopyOnce(bubble, text);
     return bubble;
   }
 
-  private appendMessageReplay(role: "user" | "assistant", text: string, reasoning?: string): void {
+  private appendMessageReplay(
+    role: "user" | "assistant",
+    text: string,
+    reasoning?: string,
+    process?: Array<{ kind: "tool" | "think"; text: string }>
+  ): void {
     const row = this.messagesEl.createDiv({ cls: `obdsh-msg obdsh-msg-${role}` });
+    if (role === "assistant" && process && process.length > 0) {
+      // Execution detail lives in its own full-width strip above the bubble,
+      // indented to align with the bubble — never pushed the avatar aside.
+      const strip = row.createDiv({ cls: "obdsh-process-strip" });
+      for (const p of process) {
+        strip.createDiv({ cls: "obdsh-process-chip", text: p.text });
+      }
+    }
     const avatar = row.createDiv({
       cls: "obdsh-avatar" + (role === "assistant" ? " obdsh-avatar-ai" : " obdsh-avatar-user"),
     });
@@ -1442,12 +2352,14 @@ export class ChatView extends ItemView {
     } else {
       void this.renderMarkdown(bubble, text);
     }
-    this.attachCopyButton(row, text);
+    this.attachCopyOnce(bubble, text);
   }
 
-  /** Small copy button that appears on hover and copies the raw message text. */
-  private attachCopyButton(row: HTMLElement, text: string): void {
-    const btn = row.createEl("button", {
+  /** Copy button appended to the bubble under the text (in-flow); replaces any
+   * existing one so streaming re-renders never stack duplicate buttons. */
+  private attachCopyOnce(host: HTMLElement, text: string): void {
+    host.querySelector(".obdsh-copy-btn")?.remove();
+    const btn = host.createEl("button", {
       cls: "obdsh-copy-btn",
       attr: { title: t("copy"), "aria-label": t("copy") },
     });
@@ -1534,6 +2446,13 @@ function fmtTok(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(0)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
+}
+
+/** Strip a `namespace/tool` tool-name into a readable short label. */
+function toolDisplayName(tool: string): string {
+  const s = String(tool || "");
+  const slash = s.lastIndexOf("/");
+  return slash >= 0 ? s.slice(slash + 1) : s;
 }
 
 /**
