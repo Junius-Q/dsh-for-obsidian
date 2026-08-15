@@ -2051,9 +2051,6 @@ export class ChatView extends ItemView {
     let latest: { text: string; reasoning: string } = { text: "", reasoning: "" };
     let latestSeq = baseline; // ignore everything before this turn's baseline
     let stableTicks = 0;
-    let streamedText = "";    // progressive assistant text rendered from chunks
-    let streamedDirty = false;
-    let lastRenderSeq = 0;
     let renderedAny = false;  // whether we've placed an assistant bubble yet
 
     while (Date.now() < deadline) {
@@ -2097,19 +2094,9 @@ export class ChatView extends ItemView {
           if (msg) errorText = msg;
           continue;
         }
-        // Streaming: render text as it arrives via assistant/chunk (block-end).
-        // dsh emits one block-end per text block; accumulate and re-render the
-        // bubble each poll so the reply "types out" progressively instead of
-        // appearing all at once at the final assistant/message.
+        // assistant/chunk carries token deltas; we render from the final
+        // assistant/message (complete), so chunk frames here are skipped.
         if (type === "assistant/chunk") {
-          const chunkData = e.event?.data as
-            | { chunk?: { type?: string; block?: { type?: string; text?: string } } }
-            | undefined;
-          const c = chunkData?.chunk;
-          if (c?.type === "block-end" && c.block?.type === "text" && c.block.text) {
-            streamedText += c.block.text;
-            streamedDirty = true;
-          }
           continue;
         }
         if (type !== "assistant/message") continue;
@@ -2160,25 +2147,20 @@ export class ChatView extends ItemView {
         if (anyNew) {
           stableTicks = 0;
         } else if (++stableTicks >= 3) {
-          return this.combineReply(streamedText, latest);
+          return this.combineReply(latest);
         }
       } else {
         stableTicks = 0;
       }
       await new Promise((r) => setTimeout(r, 1000));
     }
-    return this.combineReply(streamedText, latest);
+    return this.combineReply(latest);
   }
 
   /** Fold the streamed multi-step text with the latest parsed reply into the
    * result returned to the caller, so nothing is lost on persist/replay. */
-  private combineReply(
-    streamed: string,
-    latest: { text: string; reasoning: string }
-  ): { text: string; reasoning: string } {
-    // The authoritative reply is the latest assistant/message's text. streamed
-    // was only used for progressive UI display; folding it back in duplicates
-    // the same paragraph (chunks already contain the full text), so DON'T.
+  private combineReply(latest: { text: string; reasoning: string }): { text: string; reasoning: string } {
+    // The authoritative reply is the latest assistant/message's text.
     return { text: latest.text, reasoning: latest.reasoning || "" };
   }
 
