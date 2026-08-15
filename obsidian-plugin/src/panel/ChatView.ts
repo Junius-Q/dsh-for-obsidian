@@ -1743,7 +1743,15 @@ export class ChatView extends ItemView {
     // exact same text, skip — streamFromDsh and pauseForAgentReply can both be
     // called for one turn and would otherwise pile up copies.
     const last = s.messages[s.messages.length - 1];
-    if (role === "assistant" && last && last.role === "assistant" && last.text === text) {
+    // De-duplicate: skip if the last stored message is an assistant reply with
+    // the same text (trimmed), so streamFromDsh + pauseForAgentReply don't pile
+    // up copies even with minor whitespace differences.
+    if (
+      role === "assistant" &&
+      last &&
+      last.role === "assistant" &&
+      last.text.trim() === text.trim()
+    ) {
       return;
     }
     const msg: ChatMessage = { role, text };
